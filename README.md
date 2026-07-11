@@ -14,6 +14,20 @@ cd out && gren docs   # the output compiles with the official Gren compiler
 
 ## How it works
 
+```mermaid
+flowchart TD
+    A["elm-to-gren author/package"] --> B["Acquire<br/>package.elm-lang.org or local path"]
+    B --> C["Resolve dependency graph<br/>catalog packages vs transpile targets"]
+    C --> D["elm-review rule (Elm)<br/>structural edits + resolved references + import facts"]
+    D --> E["Map references against catalog<br/>mappings/builtin.json"]
+    E --> F["Apply all edits in one pass<br/>+ lexical finalize"]
+    F --> G["Generate ElmToGren.Compat.* adapters<br/>+ missing imports"]
+    G --> H["Emit Gren workspace atomically<br/>gren.json, src/, package bundles"]
+    H --> I["Verify with the Gren compiler"]
+    I -->|ok| J["Ported package(s)"]
+    I -->|compile error| K["Fail with diagnostics<br/>catalog gap or refused feature"]
+```
+
 1. **Acquire** the Elm package and resolve its dependency graph
    (package.elm-lang.org or a local path).
 2. **Analyze** every module with a custom [elm-review](https://package.elm-lang.org/packages/jfmengels/elm-review/latest/)

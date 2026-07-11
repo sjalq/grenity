@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "seed": 42,
+  "selection": "Random sample of packages whose direct dependencies are a subset of the supported Elm platform set (elm/core, elm/json, elm/time, elm/random, elm/bytes, elm/regex, elm/url, elm/parser). Selected via seeded shuffle of package.elm-lang.org/all-packages.",
+  "packages": [
+    { "name": "edkv/elm-generic-dict", "version": "1.0.0" },
+    { "name": "alex-tan/postgrest-queries", "version": "7.2.0" },
+    { "name": "jxxcarlson/markdown-to-scripta", "version": "1.0.4" },
+    { "name": "malinoff/elm-uniform", "version": "2.0.0" },
+    { "name": "emilianobovetti/list-assoc", "version": "1.0.0" },
+    { "name": "tad-lispy/springs", "version": "1.0.5" },
+    { "name": "wittjosiah/elm-ordered-dict", "version": "1.0.2" },
+    { "name": "jinjor/elm-map-debug", "version": "1.1.0" },
+    { "name": "alexandrepiveteau/elm-gap-buffer", "version": "1.0.0" },
+    { "name": "jonoabroad/commatosed", "version": "1.0.0" },
+    { "name": "stil4m/structured-writer", "version": "1.0.3" },
+    { "name": "Janiczek/transform", "version": "1.1.1" },
+    { "name": "techbelly/elm-zmachine", "version": "1.1.0" },
+    { "name": "Orasund/elm-game-ai-minimax", "version": "1.0.0" },
+    { "name": "alexanderkiel/list-selection", "version": "1.0.0" },
+    { "name": "Punie/elm-reader", "version": "2.0.0" },
+    { "name": "insurello/elm-swedish-bank-account-number", "version": "2.0.3" },
+    { "name": "rluiten/trie", "version": "2.1.1" },
+    { "name": "adauguet/elm-spanned-string", "version": "1.0.1" },
+    { "name": "0ui/elm-task-parallel", "version": "2.0.0" }
+  ]
+}

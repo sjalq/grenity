@@ -164,15 +164,26 @@ parseCoordinate source =
     let
         pieces =
             String.split "@" source
-    in
-    when pieces is
-        [ packageName ] ->
+
+        packageOnly packageName =
             PackageName.parse packageName
                 |> Result.map (\name -> RegistryPackage { name = name, version = Nothing })
                 |> Result.mapError
                     (PackageName.errorToString
                         >> PortError.create "INVALID_PACKAGE_NAME"
                     )
+    in
+    when pieces is
+        [ packageName ] ->
+            packageOnly packageName
+
+        -- Match package-site /latest/ URLs and Acquire.Coordinate: @latest means
+        -- "resolve newest", not a literal semver component.
+        [ packageName, "latest" ] ->
+            packageOnly packageName
+
+        [ _, "" ] ->
+            Err (PortError.create "INVALID_ARGUMENT" ("Invalid Elm package coordinate " ++ source ++ "."))
 
         [ packageName, version ] ->
             Result.map2
@@ -266,7 +277,13 @@ loadRegistry permissions options =
                             (\cached ->
                                 if cached then
                                     fromCache
-                                        |> Task.onError (\_ -> Task.fail fetchError)
+                                        |> Task.onError
+                                            (\_ ->
+                                                Task.fail <|
+                                                    PortError.withHint
+                                                        "A cached registry index was present but unusable after the online refresh failed."
+                                                        fetchError
+                                            )
 
                                 else
                                     Task.fail <|
@@ -301,16 +318,16 @@ loadManifest permissions options name version =
 
         url =
             packageUrl options name version "elm.json"
-    in
-    cachedText permissions options path url
-        |> Task.andThen
-            (Manifest.decodeString
-                >> resultTask
+
+        decode body =
+            Manifest.decodeString body
+                |> resultTask
                     (Manifest.errorToString
                         >> PortError.create "ELM_MANIFEST_INVALID"
                     )
-            )
-        |> Task.andThen (validateIdentity name version)
+                |> Task.andThen (validateIdentity name version)
+    in
+    cachedArtifact permissions options path url decode
 
 
 acquireLocal : FileSystem.Permission -> Path -> Task Error PackageSource
@@ -391,16 +408,21 @@ resolveVersion permissions options name requested =
 
 loadEndpoint : Permissions -> Options -> Name -> Version -> Task Error Endpoint
 loadEndpoint permissions options name version =
-    cachedText permissions options
-        (packageCachePath options name version "endpoint.json")
-        (packageUrl options name version "endpoint.json")
-        |> Task.andThen
-            (Decode.decodeString endpointDecoder
-                >> resultTask
+    let
+        path =
+            packageCachePath options name version "endpoint.json"
+
+        url =
+            packageUrl options name version "endpoint.json"
+
+        decode body =
+            Decode.decodeString endpointDecoder body
+                |> resultTask
                     (Decode.errorToString
                         >> PortError.create "REGISTRY_INVALID"
                     )
-            )
+    in
+    cachedArtifact permissions options path url decode
 
 
 endpointDecoder : Decode.Decoder Endpoint
@@ -427,13 +449,55 @@ isHexDigit character =
         || Array.member character [ 'a', 'b', 'c', 'd', 'e', 'f', 'A', 'B', 'C', 'D', 'E', 'F' ]
 
 
-cachedText : Permissions -> Options -> Path -> String -> Task Error String
-cachedText permissions options cachePath url =
+{-| Load an immutable registry artifact, preferring cache.
+
+Online mode re-downloads once when the cache is missing, unreadable, or fails
+validation (corrupt JSON, wrong package identity, etc.). Offline mode never
+hits the network. Successful network bodies are written best-effort so a
+read-only cache directory still yields a usable result.
+-}
+cachedArtifact
+    : Permissions
+    -> Options
+    -> Path
+    -> String
+    -> (String -> Task Error value)
+    -> Task Error value
+cachedArtifact permissions options cachePath url decode =
+    let
+        fromNetwork =
+            fetchString permissions.http url
+                |> Task.andThen
+                    (\body ->
+                        decode body
+                            |> Task.andThen
+                                (\value ->
+                                    System.File.writeText permissions.fileSystem cachePath body
+                                        |> Task.map (\_ -> value)
+                                        |> Task.onError (\_ -> Task.succeed value)
+                                )
+                    )
+
+        fromCache =
+            System.File.readText permissions.fileSystem cachePath
+                |> Task.andThen decode
+    in
     System.File.exists permissions.fileSystem cachePath
         |> Task.andThen
             (\cached ->
                 if cached then
-                    System.File.readText permissions.fileSystem cachePath
+                    fromCache
+                        |> Task.onError
+                            (\cacheError ->
+                                if options.offline then
+                                    Task.fail cacheError
+
+                                else
+                                    -- A corrupt or mismatched cached artifact would otherwise stick forever.
+                                    removeIfExists permissions.fileSystem cachePath
+                                        |> Task.onError (\_ -> Task.succeed {})
+                                        |> Task.andThen (\_ -> fromNetwork)
+                            )
 
                 else if options.offline then
                     Task.fail <|
@@ -441,13 +505,7 @@ cachedText permissions options cachePath url =
                             ("Offline cache does not contain " ++ Path.toPosixString cachePath ++ ".")
 
                 else
-                    fetchString permissions.http url
-                        |> Task.andThen
-                            (\body ->
-                                System.File.writeText permissions.fileSystem cachePath body
-                                    |> Task.map (\_ -> body)
-                                    |> Task.onError (\_ -> Task.succeed body)
-                            )
+                    fromNetwork
             )
 
 

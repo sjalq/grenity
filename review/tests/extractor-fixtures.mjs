@@ -215,15 +215,52 @@ assert.match(
 );
 assert.match(
   useOutput,
-  /Nothing -> Nothing Just \{ first = \{ first = first, second = second \} , rest = rest \}/u,
+  /Nothing -> Nothing Just \{ first = \{ first = first, second = second \}, rest = rest \}/u,
 );
 assert.match(
   useOutput,
   /Pairish \{ first = \{ first = first, second = second \} , second = \{ first = third, second = fourth \} \}/u,
 );
-assert.match(useOutput, /first :: second :: rest/u);
-assert.equal(use.diagnostics.length, 2);
-assert.ok(use.diagnostics.every(({ code }) => code === "UNMAPPED_SYMBOL"));
+assert.match(
+  useOutput,
+  /Just \{ first = first, rest = rest_r\d+_c\d+_elmToGren \} ->/u,
+);
+assert.match(
+  useOutput,
+  /when Array\.popFirst rest_r\d+_c\d+_elmToGren of/u,
+);
+assert.match(
+  useOutput,
+  /Just \{ first = second, rest = rest \} ->/u,
+);
+// Multi-cons short-list fallthrough uses the `_` branch body, not Debug.todo.
+assert.match(
+  useOutput,
+  /when Array\.popFirst rest_r\d+_c\d+_elmToGren of\s+Just \{ first = second, rest = rest \} ->\s+first \+ second \+ List\.length rest\s+Nothing ->\s+0/u,
+);
+// Nested when branches must be indented past `when` (layout-sensitive).
+const useRawOutput = transformedFixtureModule("structural", use);
+assert.match(
+  useRawOutput,
+  /when Array\.popFirst rest_r\d+_c\d+_elmToGren of\n +Just \{ first = second, rest = rest \} ->\n +first \+ second \+ List\.length rest\n +Nothing ->\n +0/u,
+);
+// Triple-cons: each nested `when` must indent its Just/Nothing arms (+4), not
+// share a column with the when keyword (Gren layout).
+assert.match(
+  useRawOutput,
+  /when Array\.popFirst rest_r\d+_c\d+_elmToGren of\n( +)Just \{ first = second, rest = rest_r\d+_c\d+_elmToGren_n0 \} ->\n\1 {4}when Array\.popFirst rest_r\d+_c\d+_elmToGren_n0 of\n\1 {8}Just \{ first = third, rest = rest \} ->\n\1 {12}first \+ second \+ third \+ List\.length rest\n\1 {8}Nothing ->\n\1 {12}0\n\1Nothing ->\n\1 {4}0/u,
+);
+assert.match(useOutput, /Result\.map Array\.popFirst/u);
+assert.match(useOutput, /when Array\.popFirst rest_r\d+_c\d+_elmToGren_list of/u);
+// Embedded ctor empty-list sibling supplies the Nothing fallback body.
+assert.match(
+  useOutput,
+  /when Array\.popFirst rest_r\d+_c\d+_elmToGren_list of\s+Just \{ first = first, rest = rest \} ->\s+first \+ List\.length rest\s+Nothing ->\s+0/u,
+);
+assert.equal(
+  use.diagnostics.filter((d) => /List \(::\) pattern/u.test(d.message)).length,
+  0,
+);
 
 assert.deepEqual(
   portBoundary.diagnostics.map(({ code }) => code),

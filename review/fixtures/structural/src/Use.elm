@@ -1,4 +1,4 @@
-module Use exposing (aliasPartial, aliasValue, asFunction, commonArrayCase, consScrutinee, empty, make, match, nestedConsPattern, partial, qualified, qualifiedAlias)
+module Use exposing (aliasPartial, aliasValue, asFunction, commonArrayCase, consScrutinee, empty, embeddedCtorUncons, make, match, nestedConsPattern, partial, qualified, qualifiedAlias, resultUncons, tripleConsPattern)
 
 import Definitions as D exposing (Alias, Empty, Pairish(..))
 
@@ -81,3 +81,43 @@ nestedConsPattern values =
 
         first :: second :: rest ->
             first + second + List.length rest
+
+        _ ->
+            0
+
+
+tripleConsPattern : List Int -> Int
+tripleConsPattern values =
+    case values of
+        first :: second :: third :: rest ->
+            first + second + third + List.length rest
+
+        _ ->
+            0
+
+
+type Box a
+    = Box a
+
+
+embeddedCtorUncons : Box (List Int) -> Int
+embeddedCtorUncons boxed =
+    case boxed of
+        Box [] ->
+            0
+
+        Box (first :: rest) ->
+            first + List.length rest
+
+
+resultUncons : Result String (List Int) -> Int
+resultUncons value =
+    case value of
+        Err _ ->
+            -1
+
+        Ok [] ->
+            0
+
+        Ok (first :: rest) ->
+            first + List.length rest

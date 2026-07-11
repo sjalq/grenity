@@ -630,10 +630,7 @@ emitGraph permissions options registry resolution drafts planned =
 
                 validate staging =
                     if options.verify then
-                        Verify.Package.verify options.platform permissions.childProcess
-                            { packageDirectory = staging
-                            , grenExecutable = options.grenExecutable
-                            }
+                        verifyStaging options.platform permissions.childProcess options.grenExecutable rootIdentity planned staging
 
                     else
                         Task.succeed {}
@@ -661,6 +658,40 @@ emitGraph permissions options registry resolution drafts planned =
                         , report = report
                         }
                     )
+
+
+verifyStaging : Node.Platform -> ChildProcess.Permission -> String -> Plan.Identity -> Planned -> Path -> Task Error {}
+verifyStaging platform permission grenExecutable rootIdentity planned staging =
+    planned.packages
+        |> Array.foldl
+            (\package pending ->
+                pending
+                    |> Task.andThen
+                        (\_ ->
+                            let
+                                directory =
+                                    if package.manifest.name == rootIdentity.grenName then
+                                        staging
+
+                                    else
+                                        Path.join
+                                            [ staging
+                                            , Path.fromPosixString ".elm-to-gren/packages"
+                                            , Path.fromPosixString
+                                                (Workspace.packageDirectoryName
+                                                    { name = package.manifest.name
+                                                    , version = package.manifest.version
+                                                    }
+                                                )
+                                            ]
+                            in
+                            Verify.Package.verify platform permission
+                                { packageDirectory = directory
+                                , grenExecutable = grenExecutable
+                                }
+                        )
+            )
+            (Task.succeed {})
 
 
 packageSummaries : Resolution -> Dict String Draft -> Planned -> Array PackageSummary

@@ -5,6 +5,7 @@ module Cli exposing
     , PlatformChoice(..)
     , help
     , parse
+    , wantsJson
     )
 
 import Compiler.Platform as Platform exposing (Platform)
@@ -51,6 +52,15 @@ type alias ParseState =
     , verify : Bool
     , json : Bool
     }
+
+
+{-| Whether the raw argv requests machine-readable errors.
+
+Used when parse fails before `Options` exist so `--json` still yields Port.Error JSON.
+-}
+wantsJson : Array String -> Bool
+wantsJson arguments =
+    Array.member "--json" arguments
 
 
 parse : Defaults -> Array String -> Result String Command

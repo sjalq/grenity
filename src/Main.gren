@@ -90,7 +90,16 @@ runCommand
 runCommand environment context permissions parsed =
     when parsed is
         Err parseError ->
-            fail environment (parseError ++ "\n\n" ++ Cli.help)
+            if Cli.wantsJson environment.args then
+                fail environment
+                    (Encode.encode 0
+                        (PortError.toJson
+                            (PortError.create "INVALID_ARGUMENT" parseError)
+                        )
+                    )
+
+            else
+                fail environment (parseError ++ "\n\n" ++ Cli.help)
 
         Ok Cli.Help ->
             Stream.Log.string environment.stdout Cli.help

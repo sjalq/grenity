@@ -55,22 +55,34 @@ Refused with a diagnostic (no portable translation exists):
 - effect modules and `Elm.Kernel` / `Native` code
 - GLSL shader expressions
 - identifiers named `when` / `is` (Gren reserved words)
-- a few list-pattern shapes (`x :: y :: rest`, uncons under non-`Maybe`
-  constructors)
+
+List patterns are rewritten for Gren arrays: `x :: xs` becomes
+`Array.popFirst` with `Just { first, rest }`, multi-cons (`x :: y :: rest`)
+nests further `popFirst` in the branch body, and uncons under `Maybe`,
+`Result`, or other single-argument constructors is rewritten in place.
 
 API gaps in cataloged modules surface as real Gren compile errors at the
 verify step; the fix is a catalog entry or adapter, not code.
 
+## Ecosystem smoke tests
+
+`npm run test:ecosystem` ports 20 randomly selected (seeded) pure Elm packages
+whose direct dependencies stay within the supported platform set
+(`elm/core`, `elm/json`, `elm/time`, `elm/random`, `elm/bytes`, `elm/regex`,
+`elm/url`, `elm/parser`) and checks that each run completes with verification.
+
 ## Development
 
 ```sh
-npm run test:all   # host unit tests, elm-review rule fixtures, e2e scenarios
+npm run test:all        # unit, rule fixtures, e2e, ecosystem (network)
+npm run test:ecosystem  # 20 seeded pure packages from package.elm-lang.org
 ```
 
 - `src/` — the Gren CLI (acquire, resolve, transform, emit, verify)
 - `review/` — the elm-review rule that produces edits, references, and imports
 - `mappings/builtin.json` — the Elm→Gren package/API catalog
-- `test/` — unit and end-to-end suites
+- `test/` — unit, end-to-end, and ecosystem suites
+- `test/ecosystem/packages.json` — seeded sample of qualifying registry packages
 
 ## License
 

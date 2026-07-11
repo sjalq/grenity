@@ -53,30 +53,59 @@ loadIndex permissions options =
         cachePath =
             Cache.allPackagesPath options.cacheDirectory
 
-        decode loaded =
-            when ElmRegistry.decodeString loaded.body is
+        decodeBody sourceLabel body =
+            when ElmRegistry.decodeString body is
                 Ok registry ->
-                    if loaded.fetched then
-                        -- Cache write is best-effort: a valid online registry
-                        -- response must still be usable when the cache cannot be written.
-                        System.File.writeText permissions.fileSystem cachePath loaded.body
-                            |> Task.map (\_ -> registry)
-                            |> Task.onError (\_ -> Task.succeed registry)
-
-                    else
-                        Task.succeed registry
+                    Ok registry
 
                 Err registryError ->
-                    Task.fail <|
+                    Err <|
                         PortError.create "INVALID_REGISTRY_CACHE"
-                            ((if loaded.fetched then
-                                "The Elm registry returned invalid /all-packages data: "
+                            (sourceLabel ++ ElmRegistry.errorToString registryError)
 
-                              else
-                                "The cached Elm /all-packages data is invalid: "
-                             )
-                                ++ ElmRegistry.errorToString registryError
+        acceptFetched body =
+            when decodeBody "The Elm registry returned invalid /all-packages data: " body is
+                Ok registry ->
+                    -- Cache write is best-effort: a valid online registry
+                    -- response must still be usable when the cache cannot be written.
+                    System.File.writeText permissions.fileSystem cachePath body
+                        |> Task.map (\_ -> registry)
+                        |> Task.onError (\_ -> Task.succeed registry)
+
+                Err onlineDecodeError ->
+                    -- A 200 with a corrupt body should not mask a usable cache.
+                    readRequiredCache permissions.fileSystem
+                        { code = "REGISTRY_CACHE_MISS"
+                        , description = "fallback Elm /all-packages registry index"
+                        , path = cachePath
+                        }
+                        |> Task.andThen
+                            (\cachedBody ->
+                                when decodeBody "The cached Elm /all-packages data is invalid: " cachedBody is
+                                    Ok registry ->
+                                        Task.succeed registry
+
+                                    Err _ ->
+                                        Task.fail <|
+                                            PortError.withHint
+                                                "A cached registry index was present but unusable after the online refresh returned invalid data."
+                                                onlineDecodeError
                             )
+                        |> Task.onError
+                            (\_ ->
+                                Task.fail <|
+                                    PortError.withHint
+                                        "No usable cached registry index was available after the online refresh returned invalid data."
+                                        onlineDecodeError
+                            )
+
+        acceptCached body =
+            when decodeBody "The cached Elm /all-packages data is invalid: " body is
+                Ok registry ->
+                    Task.succeed registry
+
+                Err cacheError ->
+                    Task.fail cacheError
     in
     if options.offline then
         readRequiredCache permissions.fileSystem
@@ -84,12 +113,11 @@ loadIndex permissions options =
             , description = "Elm /all-packages registry index"
             , path = cachePath
             }
-            |> Task.map (\body -> { body = body, fetched = False })
-            |> Task.andThen decode
+            |> Task.andThen acceptCached
 
     else
         fetchText permissions.http "REGISTRY_FETCH_FAILED" allPackagesUrl
-            |> Task.map (\body -> { body = body, fetched = True })
+            |> Task.andThen acceptFetched
             |> Task.onError
                 (\fetchError ->
                     readRequiredCache permissions.fileSystem
@@ -97,7 +125,7 @@ loadIndex permissions options =
                         , description = "fallback Elm /all-packages registry index"
                         , path = cachePath
                         }
-                        |> Task.map (\body -> { body = body, fetched = False })
+                        |> Task.andThen acceptCached
                         |> Task.onError
                             (\_ ->
                                 Task.fail <|
@@ -106,7 +134,6 @@ loadIndex permissions options =
                                         fetchError
                             )
                 )
-            |> Task.andThen decode
 
 
 resolveVersion : Permissions -> Options -> Coordinate -> Task Error Version

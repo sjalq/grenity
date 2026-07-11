@@ -16,6 +16,7 @@ import Dict exposing (Dict)
 import Elm.Acquire as Acquire
 import Elm.Manifest exposing (Manifest)
 import Elm.PackageName as PackageName exposing (Name)
+import Elm.Registry as ElmRegistry
 import Elm.Semver as Semver
 import Emit.Workspace as Workspace
 import FileSystem
@@ -144,20 +145,70 @@ run context permissions cliOptions =
 
 resolveGraph : Permissions -> Acquire.Options -> Registry -> Acquire.PackageSource -> Task Error Resolution
 resolveGraph permissions acquireOptions registry rootSource =
-    Resolve.Online.resolve
-        { isMapped =
-            \name ->
+    let
+        isMapped name =
+            when MappingRegistry.mappingFor (PackageName.toString name) registry is
+                Just mapping ->
+                    Mapping.mappingKind mapping /= TranspileKind
+
+                Nothing ->
+                    False
+
+        solverOptions =
+            { isMapped = isMapped }
+    in
+    -- Mapped dependencies are omitted from the solver graph. When every direct
+    -- root dependency is already mapped, no registry index is required.
+    if hasUnmappedDependencies registry rootSource.manifest then
+        -- Load /all-packages once for the whole search. Calling loadVersions
+        -- per candidate package re-fetched the mutable index on every probe and
+        -- could observe inconsistent snapshots mid-solve.
+        Acquire.loadRegistry permissions acquireOptions
+            |> Task.andThen
+                (\elmRegistry ->
+                    Resolve.Online.resolve solverOptions
+                        { versionsFor = versionsFor elmRegistry
+                        , manifestFor = Acquire.loadManifest permissions acquireOptions
+                        }
+                        rootSource.manifest
+                )
+
+    else
+        Solver.solveWith solverOptions Dict.empty rootSource.manifest
+            |> Result.mapError
+                (Solver.errorToString
+                    >> PortError.create "DEPENDENCY_CONFLICT"
+                )
+            |> resultTask identity
+
+
+{-| Whether any direct dependency must be acquired or transpiled.
+`Transpile` mappings intentionally count as unmapped for solving.
+-}
+hasUnmappedDependencies : Registry -> Manifest -> Bool
+hasUnmappedDependencies registry manifest =
+    Elm.Manifest.dependencyNames manifest
+        |> Array.any
+            (\name ->
                 when MappingRegistry.mappingFor (PackageName.toString name) registry is
                     Just mapping ->
-                        Mapping.mappingKind mapping /= TranspileKind
+                        Mapping.mappingKind mapping == TranspileKind
 
                     Nothing ->
-                        False
-        }
-        { versionsFor = Acquire.loadVersions permissions acquireOptions
-        , manifestFor = Acquire.loadManifest permissions acquireOptions
-        }
-        rootSource.manifest
+                        True
+            )
+
+
+versionsFor : ElmRegistry.Registry -> Name -> Task Error (Array Semver.Version)
+versionsFor elmRegistry name =
+    when ElmRegistry.versionsFor name elmRegistry is
+        Just versions ->
+            Task.succeed versions
+
+        Nothing ->
+            Task.fail <|
+                PortError.create "PACKAGE_NOT_FOUND"
+                    ("Elm registry does not contain " ++ PackageName.toString name ++ ".")
 
 
 acquireSources
@@ -664,7 +715,9 @@ mappingDigest permission builtin overlays =
                     |> Task.andThen
                         (\texts ->
                             System.File.readText permission path
-                                |> Task.map (\text -> Array.pushLast (Path.toPosixString path ++ "\n" ++ text) texts)
+                                -- Content only: absolute paths would make the lockfile
+                                -- digest machine-specific for identical mapping files.
+                                |> Task.map (\text -> Array.pushLast text texts)
                         )
             )
             (Task.succeed [])
@@ -673,7 +726,13 @@ mappingDigest permission builtin overlays =
                 Crypto.getSecureContext
                     |> Task.mapError (\_ -> PortError.create "CRYPTO_FAILED" "Could not initialize SHA-256.")
                     |> Task.andThen
-                        (\context -> Crypto.digest context Crypto.Sha256 (Bytes.fromString (String.join "\n" texts)))
+                        (\context ->
+                            Crypto.digest context
+                                Crypto.Sha256
+                                (Bytes.fromString
+                                    (String.join "\n---elm-to-gren-mapping---\n" texts)
+                                )
+                        )
                     |> Task.andThen
                         (\digestBytes ->
                             when bytesToHex digestBytes is

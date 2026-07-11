@@ -1,0 +1,9 @@
+Built binary of https://github.com/gilramir/gren-format (Gren 0.6.x).
+
+Rebuild (from a sibling checkout of gilramir's format repos):
+
+    ./scripts/build-gren-format.sh
+
+Then run on a Gren package directory:
+
+    node tools/gren-format/app

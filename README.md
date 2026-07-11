@@ -38,8 +38,10 @@ flowchart TD
    (`mappings/builtin.json`): `List.filter`→`Array.keepIf`,
    `Basics.round`→`Math.round`, `elm/regex`→`String.Regex`, and so on.
    Unmapped gaps are bridged by generated `ElmToGren.Compat.*` adapter modules.
-4. **Emit** Gren manifests, sources, and package bundles atomically, then
-   **verify** the result with the real Gren compiler before publishing the
+4. **Emit** Gren manifests, sources, and package bundles atomically.
+5. **Format** every package with the vendored [gilramir/gren-format](https://github.com/gilramir/gren-format)
+   tool (community reimplementation of official `gren format`, removed in 0.5).
+6. **Verify** with the real Gren compiler (`gren docs`) before publishing the
    workspace.
 
 ## What ports
@@ -78,10 +80,11 @@ npm run test:all        # unit, rule fixtures, e2e, ecosystem (network)
 npm run test:ecosystem  # 20 seeded pure packages from package.elm-lang.org
 ```
 
-- `src/` — the Gren CLI (acquire, resolve, transform, emit, verify)
+- `src/` — the Gren CLI (acquire, resolve, transform, format, emit, verify)
 - `review/` — the elm-review rule that produces edits, references, and imports
 - `mappings/builtin.json` — the Elm→Gren package/API catalog
-- `test/` — unit, end-to-end, and ecosystem suites
+- `tools/gren-format/` — vendored gilramir/gren-format binary (`scripts/build-gren-format.sh` rebuilds it)
+- `test/` — unit, format, end-to-end, and ecosystem suites
 - `test/ecosystem/packages.json` — seeded sample of qualifying registry packages
 
 ## License

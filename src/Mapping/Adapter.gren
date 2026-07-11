@@ -301,13 +301,13 @@ product values =
 
 
 map4 : (a -> b -> c -> d -> value) -> Array a -> Array b -> Array c -> Array d -> Array value
-map4 fn as_ bs cs ds =
-    Array.map2 (\\partial d -> partial d) (Array.map3 fn as_ bs cs) ds
+map4 fn arrs bs cs ds =
+    Array.map2 (\\partial d -> partial d) (Array.map3 fn arrs bs cs) ds
 
 
 map5 : (a -> b -> c -> d -> e -> value) -> Array a -> Array b -> Array c -> Array d -> Array e -> Array value
-map5 fn as_ bs cs ds es =
-    Array.map2 (\\partial e -> partial e) (map4 fn as_ bs cs ds) es
+map5 fn arrs bs cs ds es =
+    Array.map2 (\\partial e -> partial e) (map4 fn arrs bs cs ds) es
 
 
 tail : Array a -> Maybe (Array a)

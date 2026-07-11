@@ -250,6 +250,12 @@ assert.match(
   useRawOutput,
   /when Array\.popFirst rest_r\d+_c\d+_elmToGren of\n( +)Just \{ first = second, rest = rest_r\d+_c\d+_elmToGren_n0 \} ->\n\1 {4}when Array\.popFirst rest_r\d+_c\d+_elmToGren_n0 of\n\1 {8}Just \{ first = third, rest = rest \} ->\n\1 {12}first \+ second \+ third \+ List\.length rest\n\1 {8}Nothing ->\n\1 {12}0\n\1Nothing ->\n\1 {4}0/u,
 );
+// Exact multi-cons (`a :: b :: []`) must not emit non-exhaustive `rest = []`
+// inside a nested Just arm; guard with `when rest is []`.
+assert.match(
+  useRawOutput,
+  /when Array\.popFirst rest_r\d+_c\d+_elmToGren of\n( +)Just \{ first = second, rest = rest_r\d+_c\d+_elmToGren_n0_e \} ->\n\1 {4}when rest_r\d+_c\d+_elmToGren_n0_e is\n\1 {8}\[\] ->\n\1 {12}first \+ second\n\1 {8}_ ->\n\1 {12}0\n\1Nothing ->\n\1 {4}0/u,
+);
 assert.match(useOutput, /Result\.map Array\.popFirst/u);
 assert.match(useOutput, /when Array\.popFirst rest_r\d+_c\d+_elmToGren_list of/u);
 // Embedded ctor empty-list sibling supplies the Nothing fallback body.
@@ -257,9 +263,38 @@ assert.match(
   useOutput,
   /when Array\.popFirst rest_r\d+_c\d+_elmToGren_list of\s+Just \{ first = first, rest = rest \} ->\s+first \+ List\.length rest\s+Nothing ->\s+0/u,
 );
-assert.equal(
-  use.diagnostics.filter((d) => /List \(::\) pattern/u.test(d.message)).length,
-  0,
+// Embedded exact `Ctor (x :: [])` needs an empty-rest guard. Longer lists use
+// the `_` branch body (-1); empty lists use the sibling `Ctor []` body (0).
+assert.match(
+  useRawOutput,
+  /when Array\.popFirst rest_r\d+_c\d+_elmToGren_list of\n( +)Just \{ first = first, rest = rest_r\d+_c\d+_elmToGren_e \} ->\n\1 {4}when rest_r\d+_c\d+_elmToGren_e is\n\1 {8}\[\] ->\n\1 {12}first\n\1 {8}_ ->\n\1 {12}-1\n\1Nothing ->\n\1 {4}0/u,
+);
+// Unsafe exact-then-open-rest shapes must refuse: nested empty-rest guards
+// cannot fall through to an open-rest sibling, so :: patterns remain.
+// Named catch-alls (`other`) likewise refuse: fallbacks cannot rebind them.
+assert.ok(
+  use.diagnostics.filter((d) => /List \(::\) pattern/u.test(d.message)).length
+    >= 5,
+);
+assert.match(
+  useRawOutput,
+  /unsafeExactThenOpenRest[\s\S]*?first :: second :: \[\][\s\S]*?first :: second :: rest/u,
+);
+assert.match(
+  useRawOutput,
+  /unsafeEmbeddedExactThenOpen[\s\S]*?Box \(first :: \[\]\)[\s\S]*?Box \(first :: rest\)/u,
+);
+assert.match(
+  useRawOutput,
+  /unsafeExactThenVarCatchAll[\s\S]*?first :: second :: \[\][\s\S]*?other/u,
+);
+assert.match(
+  useRawOutput,
+  /unsafeMultiConsVarCatchAll[\s\S]*?first :: second :: rest[\s\S]*?other/u,
+);
+assert.match(
+  useRawOutput,
+  /unsafeEmbeddedVarCatchAll[\s\S]*?Box \(first :: \[\]\)[\s\S]*?other/u,
 );
 
 assert.deepEqual(

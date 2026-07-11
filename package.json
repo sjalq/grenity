@@ -20,6 +20,7 @@
     "review/elm.json",
     "review/src",
     "mappings",
+    "tools/gren-format",
     "gren.json",
     "gren_packages",
     "README.md",
@@ -32,8 +33,9 @@
     "test:rule": "cd review && elm make src/ReviewConfig.elm --output=/dev/null && node tests/extractor-fixtures.mjs",
     "test:e2e": "node -e \"const fs=require('node:fs');fs.mkdirSync('dist',{recursive:true})\" && gren make E2EMain --output=dist/e2e-tests.js && node test/run-e2e.cjs",
     "test:ecosystem": "npm run build --silent && node test/ecosystem/run-ecosystem.cjs",
+    "test:format": "npm run build --silent && node test/format/run-format.cjs",
     "test:integration": "npm run test:e2e",
-    "test:all": "npm run check && npm test && npm run test:rule && npm run test:e2e && npm run test:ecosystem",
+    "test:all": "npm run check && npm test && npm run test:rule && npm run test:format && npm run test:e2e && npm run test:ecosystem",
     "prepack": "npm run test:all && npm run build",
     "start": "npm run build --silent && node bin/elm-to-gren.cjs"
   },

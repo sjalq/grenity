@@ -38,6 +38,7 @@ import Elm.Semver as Semver
 import Emit.Workspace as Workspace
 import FileSystem
 import FileSystem.Path as Path exposing (Path)
+import Format.Gren as Format
 import HttpClient
 import Json.Encode as Encode
 import Mapping.Adapter as Adapter exposing (AdapterError(..))
@@ -75,6 +76,7 @@ type alias Options =
     , reviewConfig : Path
     , elmReviewExecutable : String
     , grenExecutable : String
+    , formatExecutable : String
     , elmHome : Maybe Path
     , namespace : Maybe String
     , requestedPlatform : Cli.PlatformChoice
@@ -629,11 +631,12 @@ emitGraph permissions options registry resolution drafts planned =
                     encodeLock options registry resolution drafts planned rootIdentity
 
                 validate staging =
-                    if options.verify then
-                        verifyStaging options.platform permissions.childProcess options.grenExecutable rootIdentity planned staging
-
-                    else
-                        Task.succeed {}
+                    prepareStaging options.platform
+                        permissions.childProcess
+                        options
+                        rootIdentity
+                        planned
+                        staging
             in
             Workspace.emit
                 { fileSystem = permissions.fileSystem }
@@ -660,6 +663,44 @@ emitGraph permissions options registry resolution drafts planned =
                     )
 
 
+prepareStaging
+    : Node.Platform
+    -> ChildProcess.Permission
+    -> Options
+    -> Plan.Identity
+    -> Planned
+    -> Path
+    -> Task Error {}
+prepareStaging platform permission options rootIdentity planned staging =
+    formatStaging platform permission options.formatExecutable rootIdentity planned staging
+        |> Task.andThen
+            (\_ ->
+                if options.verify then
+                    verifyStaging platform permission options.grenExecutable rootIdentity planned staging
+
+                else
+                    Task.succeed {}
+            )
+
+
+formatStaging : Node.Platform -> ChildProcess.Permission -> String -> Plan.Identity -> Planned -> Path -> Task Error {}
+formatStaging platform permission formatExecutable rootIdentity planned staging =
+    planned.packages
+        |> Array.foldl
+            (\package pending ->
+                pending
+                    |> Task.andThen
+                        (\_ ->
+                            Format.formatPackage platform
+                                permission
+                                { packageDirectory = packageDirectory rootIdentity staging package
+                                , formatExecutable = formatExecutable
+                                }
+                        )
+            )
+            (Task.succeed {})
+
+
 verifyStaging : Node.Platform -> ChildProcess.Permission -> String -> Plan.Identity -> Planned -> Path -> Task Error {}
 verifyStaging platform permission grenExecutable rootIdentity planned staging =
     planned.packages
@@ -668,30 +709,32 @@ verifyStaging platform permission grenExecutable rootIdentity planned staging =
                 pending
                     |> Task.andThen
                         (\_ ->
-                            let
-                                directory =
-                                    if package.manifest.name == rootIdentity.grenName then
-                                        staging
-
-                                    else
-                                        Path.join
-                                            [ staging
-                                            , Path.fromPosixString ".elm-to-gren/packages"
-                                            , Path.fromPosixString
-                                                (Workspace.packageDirectoryName
-                                                    { name = package.manifest.name
-                                                    , version = package.manifest.version
-                                                    }
-                                                )
-                                            ]
-                            in
-                            Verify.Package.verify platform permission
-                                { packageDirectory = directory
+                            Verify.Package.verify platform
+                                permission
+                                { packageDirectory = packageDirectory rootIdentity staging package
                                 , grenExecutable = grenExecutable
                                 }
                         )
             )
             (Task.succeed {})
+
+
+packageDirectory : Plan.Identity -> Path -> Workspace.Package -> Path
+packageDirectory rootIdentity staging package =
+    if package.manifest.name == rootIdentity.grenName then
+        staging
+
+    else
+        Path.join
+            [ staging
+            , Path.fromPosixString ".elm-to-gren/packages"
+            , Path.fromPosixString
+                (Workspace.packageDirectoryName
+                    { name = package.manifest.name
+                    , version = package.manifest.version
+                    }
+                )
+            ]
 
 
 packageSummaries : Resolution -> Dict String Draft -> Planned -> Array PackageSummary

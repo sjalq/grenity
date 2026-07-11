@@ -8,6 +8,7 @@ import Elm.PackageName
 import Emit.Workspace
 import FileSystem
 import FileSystem.Path as Path exposing (Path)
+import Format.Gren as Format
 import Mapping.Adapter as Adapter exposing (AdapterError(..))
 import Mapping.Types as Mapping
 import Node
@@ -36,6 +37,7 @@ type alias Options =
     , overlayMappings : Array Path
     , elmReviewExecutable : String
     , grenExecutable : String
+    , formatExecutable : String
     , namespace : Maybe String
     , requestedPlatform : Cli.PlatformChoice
     , offline : Bool
@@ -229,14 +231,23 @@ emit options mappingFingerprint manifest targetName builtManifest transformed ex
                         )
 
                 validate staging =
-                    if options.verify then
-                        Verify.Package.verify options.platform options.childProcess
-                            { packageDirectory = staging
-                            , grenExecutable = options.grenExecutable
-                            }
+                    Format.formatPackage options.platform
+                        options.childProcess
+                        { packageDirectory = staging
+                        , formatExecutable = options.formatExecutable
+                        }
+                        |> Task.andThen
+                            (\_ ->
+                                if options.verify then
+                                    Verify.Package.verify options.platform
+                                        options.childProcess
+                                        { packageDirectory = staging
+                                        , grenExecutable = options.grenExecutable
+                                        }
 
-                    else
-                        Task.succeed {}
+                                else
+                                    Task.succeed {}
+                            )
             in
             Emit.Workspace.emit
                 { fileSystem = options.fileSystem }

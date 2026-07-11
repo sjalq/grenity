@@ -1,4 +1,4 @@
-module Use exposing (aliasPartial, aliasValue, asFunction, commonArrayCase, consScrutinee, empty, embeddedCtorUncons, make, match, nestedConsPattern, partial, qualified, qualifiedAlias, resultUncons, tripleConsPattern)
+module Use exposing (aliasPartial, aliasValue, asFunction, commonArrayCase, consScrutinee, empty, embeddedCtorExactUncons, embeddedCtorUncons, exactDoubleCons, make, match, nestedConsPattern, partial, qualified, qualifiedAlias, resultUncons, tripleConsPattern, unsafeEmbeddedExactThenOpen, unsafeEmbeddedVarCatchAll, unsafeExactThenOpenRest, unsafeExactThenVarCatchAll, unsafeMultiConsVarCatchAll)
 
 import Definitions as D exposing (Alias, Empty, Pairish(..))
 
@@ -96,6 +96,58 @@ tripleConsPattern values =
             0
 
 
+exactDoubleCons : List Int -> Int
+exactDoubleCons values =
+    case values of
+        first :: second :: [] ->
+            first + second
+
+        _ ->
+            0
+
+
+{-| Exact multi-cons then open rest: nested empty-rest guards cannot fall
+through to the open-rest arm, so the rewrite must refuse (keep :: diagnostics).
+-}
+unsafeExactThenOpenRest : List Int -> Int
+unsafeExactThenOpenRest values =
+    case values of
+        first :: second :: [] ->
+            first + second
+
+        first :: second :: rest ->
+            first + second + List.length rest
+
+        _ ->
+            0
+
+
+{-| Exact multi-cons then named catch-all: empty-guard failure would become
+`Debug.todo` and drop `other`, so refuse.
+-}
+unsafeExactThenVarCatchAll : List Int -> Int
+unsafeExactThenVarCatchAll values =
+    case values of
+        first :: second :: [] ->
+            first + second
+
+        other ->
+            List.length other
+
+
+{-| Multi-cons open rest with named catch-all: nested Nothing arms cannot
+rebind `other`, so refuse rather than emit `Debug.todo`.
+-}
+unsafeMultiConsVarCatchAll : List Int -> Int
+unsafeMultiConsVarCatchAll values =
+    case values of
+        first :: second :: rest ->
+            first + second + List.length rest
+
+        other ->
+            List.length other
+
+
 type Box a
     = Box a
 
@@ -108,6 +160,48 @@ embeddedCtorUncons boxed =
 
         Box (first :: rest) ->
             first + List.length rest
+
+
+embeddedCtorExactUncons : Box (List Int) -> Int
+embeddedCtorExactUncons boxed =
+    case boxed of
+        Box [] ->
+            0
+
+        Box (first :: []) ->
+            first
+
+        _ ->
+            -1
+
+
+{-| Exact embedded uncons then open rest on the same ctor: nested empty guard
+would skip the open-rest arm, so the rewrite must refuse.
+-}
+unsafeEmbeddedExactThenOpen : Box (List Int) -> Int
+unsafeEmbeddedExactThenOpen boxed =
+    case boxed of
+        Box (first :: []) ->
+            first
+
+        Box (first :: rest) ->
+            first + List.length rest
+
+        _ ->
+            -1
+
+
+{-| Embedded exact uncons with only a named catch-all: length-mismatch /
+empty-list fallbacks cannot rebind `other`, so refuse.
+-}
+unsafeEmbeddedVarCatchAll : Box (List Int) -> Int
+unsafeEmbeddedVarCatchAll boxed =
+    case boxed of
+        Box (first :: []) ->
+            first
+
+        other ->
+            -1
 
 
 resultUncons : Result String (List Int) -> Int

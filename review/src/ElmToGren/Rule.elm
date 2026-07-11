@@ -700,6 +700,7 @@ collectCaseExpression range caseBlock context =
         List.any isUnconsPattern patterns
             && List.all canRewriteArrayCasePattern patterns
             && multiConsFallthroughOk patterns
+            && multiConsExactEmptyFallthroughOk patterns
             && multiConsNestFallbackOk patterns caseBlock.cases
     then
         caseBlock.cases
@@ -709,6 +710,7 @@ collectCaseExpression range caseBlock context =
     else if
         isTupleListCase caseBlock
             && multiConsFallthroughOk (tupleListShapePatterns caseBlock)
+            && multiConsExactEmptyFallthroughOk (tupleListShapePatterns caseBlock)
             && multiConsNestFallbackOk (tupleListShapePatterns caseBlock) caseBlock.cases
             && tupleMultiConsBodyWrapOk caseBlock
     then
@@ -717,6 +719,7 @@ collectCaseExpression range caseBlock context =
     else if
         isMaybeUnconsCase patterns
             && multiConsFallthroughOk (wrappedListShapePatterns patterns)
+            && multiConsExactEmptyFallthroughOk (wrappedListShapePatterns patterns)
             && multiConsNestFallbackOk (wrappedListShapePatterns patterns) caseBlock.cases
     then
         caseBlock.cases
@@ -726,6 +729,7 @@ collectCaseExpression range caseBlock context =
     else if
         isResultUnconsCase patterns
             && multiConsFallthroughOk (wrappedListShapePatterns patterns)
+            && multiConsExactEmptyFallthroughOk (wrappedListShapePatterns patterns)
             && multiConsNestFallbackOk (wrappedListShapePatterns patterns) caseBlock.cases
     then
         caseBlock.cases
@@ -882,6 +886,96 @@ multiConsFallthroughOk patterns =
         not (List.any (\depth -> depth > 0 && depth < maxMulti) depths)
 
 
+{-| Exact-empty multi-cons (`a :: b :: []`) peels with a nested
+`when rest is []` guard. Failure of that guard cannot try sibling arms that
+share the same outer peels, so refuse when any sibling could match a longer
+list (open rest, longer exact, or longer fixed list). Catch-all `_` is fine:
+the guard pastes that body. Depth-1 `a :: []` stays at the outer `when` and
+does not need this check.
+-}
+multiConsExactEmptyFallthroughOk : List (Node Pattern) -> Bool
+multiConsExactEmptyFallthroughOk patterns =
+    patterns
+        |> List.filterMap exactEmptyMultiConsDepth
+        |> List.all (\n -> not (List.any (canMatchListLongerThan n) patterns))
+
+
+{-| Depth of a multi-cons chain whose final rest is exact `[]` (needs nested
+empty-rest guard). Nothing for depth-1 `x :: []` or open rests.
+-}
+exactEmptyMultiConsDepth : Node Pattern -> Maybe Int
+exactEmptyMultiConsDepth patternNode =
+    case parseConsChain (unwrapParenthesized patternNode) of
+        Just chain ->
+            let
+                depth : Int
+                depth =
+                    List.length chain.heads
+            in
+            if depth >= 2 && isEmptyListRest chain.rest then
+                Just depth
+
+            else
+                Nothing
+
+        Nothing ->
+            Nothing
+
+
+{-| Whether this list shape can match some list longer than `n` elements.
+
+Bare `_` is False: nested empty-rest / length-mismatch arms paste that body.
+Named catch-alls (`other`, `_ as name`) are True: they match longer lists but
+cannot be pasted (bindings would be wrong), so exact-empty rewrites must refuse.
+-}
+canMatchListLongerThan : Int -> Node Pattern -> Bool
+canMatchListLongerThan n patternNode =
+    case Node.value (unwrapParenthesized patternNode) of
+        ListPattern members ->
+            if List.any patternContainsUncons members then
+                False
+
+            else
+                List.length members > n
+
+        UnConsPattern _ _ ->
+            case parseConsChain (unwrapParenthesized patternNode) of
+                Just chain ->
+                    if isEmptyListRest chain.rest then
+                        List.length chain.heads > n
+
+                    else
+                        -- Open rest matches every length >= heads, including > n.
+                        True
+
+                Nothing ->
+                    False
+
+        VarPattern _ ->
+            True
+
+        AsPattern inner _ ->
+            case asUnconsParts inner of
+                Just _ ->
+                    -- Single-level open `as` uncons matches length >= 1.
+                    True
+
+                Nothing ->
+                    case Node.value (unwrapParenthesized inner) of
+                        AllPattern ->
+                            -- `_ as name` matches any length; binding cannot be rebuilt.
+                            True
+
+                        VarPattern _ ->
+                            True
+
+                        _ ->
+                            canMatchListLongerThan n (unwrapParenthesized inner)
+
+        _ ->
+            False
+
+
 needsMultiConsNesting : List (Node Pattern) -> Bool
 needsMultiConsNesting patterns =
     patterns
@@ -894,15 +988,18 @@ needsMultiConsNesting patterns =
 {-| Nested multi-cons peels paste a short-match fallback into synthetic
 `Nothing` arms without re-running the expression visitor. If a `_` branch
 exists, its body must be copy-safe; otherwise we would emit `Debug.todo` and
-drop real fallthrough semantics. No `_` branch means non-exhaustive in Elm, so
-`Debug.todo` is acceptable.
+drop real fallthrough semantics.
+
+No usable `_` branch: only allow when no named catch-all would have matched
+(Elm non-exhaustive → `Debug.todo` is acceptable). Named catch-alls (`other`,
+`_ as name`) must refuse so we do not replace real fallthrough with a crash.
 -}
 multiConsNestFallbackOk : List (Node Pattern) -> List ( Node Pattern, Node Expression ) -> Bool
 multiConsNestFallbackOk patterns cases =
     if needsMultiConsNesting patterns then
         case allPatternBranchBody cases of
             Nothing ->
-                True
+                not (List.any isUnusableCatchAllPattern (List.map Tuple.first cases))
 
             Just body ->
                 isCopySafeFallbackExpression body
@@ -914,16 +1011,38 @@ multiConsNestFallbackOk patterns cases =
 {-| Embedded ctor uncons always inserts a `Nothing` arm (empty list after
 widening `Ctor listName`). Prefer a sibling `Ctor []` body, else `_`. Refuse
 when that chosen body exists but is not copy-safe.
+
+Exact tails (`Ctor (x :: [])`) also need a length-mismatch arm that prefers
+`_`. If `_` exists but is not copy-safe, refuse rather than emit `Debug.todo`
+and drop fallthrough for longer lists.
+
+When neither `Ctor []` nor `_` supplies a pasteable body, refuse if a named
+catch-all would have matched (same Debug.todo trap as multi-cons nesting).
+
+Nested empty-rest guards cannot fall through to a sibling `Ctor (x :: rest)`
+(or longer fixed list) on the same constructor slot, so refuse those shapes.
 -}
 embeddedUnconsFallbackOk : List ( Node Pattern, Node Expression ) -> Bool
 embeddedUnconsFallbackOk cases =
     let
+        patterns : List (Node Pattern)
+        patterns =
+            List.map Tuple.first cases
+
         ctorNames : List String
         ctorNames =
-            cases
-                |> List.map Tuple.first
+            patterns
                 |> List.concatMap ctorUnconsSlots
                 |> List.map Tuple.first
+
+        pasteableOrNoCatchAll : Maybe (Node Expression) -> Bool
+        pasteableOrNoCatchAll maybeBody =
+            case maybeBody of
+                Just body ->
+                    isCopySafeFallbackExpression body
+
+                Nothing ->
+                    not (List.any isUnusableCatchAllPattern patterns)
 
         fallbackOk : String -> Bool
         fallbackOk ctorName =
@@ -932,14 +1051,122 @@ embeddedUnconsFallbackOk cases =
                     isCopySafeFallbackExpression body
 
                 Nothing ->
-                    case allPatternBranchBody cases of
-                        Nothing ->
-                            True
+                    pasteableOrNoCatchAll (allPatternBranchBody cases)
 
-                        Just body ->
-                            isCopySafeFallbackExpression body
+        lengthMismatchOk : Bool
+        lengthMismatchOk =
+            if hasExactEmptyEmbeddedUncons patterns then
+                pasteableOrNoCatchAll (allPatternBranchBody cases)
+
+            else
+                True
     in
     List.all fallbackOk ctorNames
+        && lengthMismatchOk
+        && embeddedExactEmptySiblingOk patterns
+
+
+{-| Catch-all that matches any value but cannot be inlined into a synthetic
+arm: the binding would be missing or wrong. Bare `_` is handled separately via
+`allPatternBranchBody`.
+-}
+isUnusableCatchAllPattern : Node Pattern -> Bool
+isUnusableCatchAllPattern patternNode =
+    case Node.value (unwrapParenthesized patternNode) of
+        VarPattern _ ->
+            True
+
+        AsPattern inner _ ->
+            case Node.value (unwrapParenthesized inner) of
+                AllPattern ->
+                    True
+
+                VarPattern _ ->
+                    True
+
+                _ ->
+                    isUnusableCatchAllPattern (unwrapParenthesized inner)
+
+        _ ->
+            False
+
+
+hasExactEmptyEmbeddedUncons : List (Node Pattern) -> Bool
+hasExactEmptyEmbeddedUncons patterns =
+    List.any
+        (\patternNode ->
+            case Node.value (unwrapParenthesized patternNode) of
+                NamedPattern _ [ arg ] ->
+                    case parseConsChain (unwrapParenthesized arg) of
+                        Just chain ->
+                            isEmptyListRest chain.rest
+
+                        Nothing ->
+                            False
+
+                _ ->
+                    False
+        )
+        patterns
+
+
+{-| Exact embedded uncons peels with a nested empty-rest guard. Sibling arms on
+the same constructor argument that can match a longer list would be skipped, so
+refuse those combinations. Top-level `_` is handled via lengthMismatchFallback.
+-}
+embeddedExactEmptySiblingOk : List (Node Pattern) -> Bool
+embeddedExactEmptySiblingOk patterns =
+    let
+        exactSlots : List ( String, Int, Int )
+        exactSlots =
+            List.concatMap embeddedExactEmptySlot patterns
+
+        slotOk : ( String, Int, Int ) -> Bool
+        slotOk ( ctorName, argIndex, n ) =
+            not
+                (List.any
+                    (\patternNode ->
+                        case Node.value (unwrapParenthesized patternNode) of
+                            NamedPattern qualifiedName args ->
+                                if qualifiedName.name /= ctorName then
+                                    False
+
+                                else
+                                    case args |> List.drop argIndex |> List.head of
+                                        Just arg ->
+                                            canMatchListLongerThan n arg
+
+                                        Nothing ->
+                                            False
+
+                            _ ->
+                                False
+                    )
+                    patterns
+                )
+    in
+    List.all slotOk exactSlots
+
+
+{-| `(ctorName, argIndex, headCount)` for single-arg `Ctor (h1 :: … :: [])`.
+-}
+embeddedExactEmptySlot : Node Pattern -> List ( String, Int, Int )
+embeddedExactEmptySlot (Node _ pattern) =
+    case pattern of
+        NamedPattern qualifiedName [ arg ] ->
+            case parseConsChain (unwrapParenthesized arg) of
+                Just chain ->
+                    if isEmptyListRest chain.rest then
+                        [ ( qualifiedName.name, 0, List.length chain.heads ) ]
+
+                    else
+                        []
+
+                Nothing ->
+                    []
+
+        _ ->
+            []
 
 
 {-| Depth of an UnCons chain only (not fixed `[...]` patterns).
@@ -1093,72 +1320,78 @@ isLowercaseIdentifier name =
 {-| Expressions safe to paste into a synthetic Nothing branch without re-running
 the expression visitor. Anything needing case/when, tuple, unit, ::, or
 multi-arg constructor rewrites must not be copied from source text.
+
+Multi-line expressions are refused: the fallback is pasted after a fixed indent
+and later lines keep their original columns, which breaks Gren layout.
 -}
 isCopySafeFallbackExpression : Node Expression -> Bool
-isCopySafeFallbackExpression (Node _ expression) =
-    case expression of
-        Integer _ ->
-            True
+isCopySafeFallbackExpression (Node range expression) =
+    if range.start.row /= range.end.row then
+        False
 
-        Hex _ ->
-            True
+    else
+        case expression of
+            Integer _ ->
+                True
 
-        Floatable _ ->
-            True
+            Hex _ ->
+                True
 
-        Literal _ ->
-            True
+            Floatable _ ->
+                True
 
-        CharLiteral _ ->
-            True
+            Literal _ ->
+                True
 
-        FunctionOrValue _ _ ->
-            True
+            CharLiteral _ ->
+                True
 
-        PrefixOperator operator ->
-            operator /= "::"
+            FunctionOrValue _ _ ->
+                True
 
-        OperatorApplication operator _ left right ->
-            operator
-                /= "::"
-                && isCopySafeFallbackExpression left
-                && isCopySafeFallbackExpression right
+            PrefixOperator operator ->
+                operator /= "::"
 
-        Negation inner ->
-            isCopySafeFallbackExpression inner
+            OperatorApplication operator _ left right ->
+                operator
+                    /= "::"
+                    && isCopySafeFallbackExpression left
+                    && isCopySafeFallbackExpression right
 
-        ParenthesizedExpression inner ->
-            isCopySafeFallbackExpression inner
+            Negation inner ->
+                isCopySafeFallbackExpression inner
 
-        Application values ->
-            -- Multi-arg constructors need record-payload rewrites. Unary
-            -- constructors (Just x, Ok x, custom unary) keep the same form in
-            -- Gren, so they are safe to paste when the argument is.
-            case values of
-                (Node _ (FunctionOrValue _ name)) :: rest ->
-                    List.all isCopySafeFallbackExpression rest
-                        && (isLowercaseIdentifier name || List.length rest == 1)
+            ParenthesizedExpression inner ->
+                isCopySafeFallbackExpression inner
 
-                _ ->
-                    False
+            Application values ->
+                -- Multi-arg constructors need record-payload rewrites. Unary
+                -- constructors (Just x, Ok x, custom unary) keep the same form in
+                -- Gren, so they are safe to paste when the argument is.
+                case values of
+                    (Node _ (FunctionOrValue _ name)) :: rest ->
+                        List.all isCopySafeFallbackExpression rest
+                            && (isLowercaseIdentifier name || List.length rest == 1)
 
-        IfBlock condition ifTrue ifFalse ->
-            isCopySafeFallbackExpression condition
-                && isCopySafeFallbackExpression ifTrue
-                && isCopySafeFallbackExpression ifFalse
+                    _ ->
+                        False
 
-        ListExpr elements ->
-            List.all isCopySafeFallbackExpression elements
+            IfBlock condition ifTrue ifFalse ->
+                isCopySafeFallbackExpression condition
+                    && isCopySafeFallbackExpression ifTrue
+                    && isCopySafeFallbackExpression ifFalse
 
-        RecordAccess record _ ->
-            isCopySafeFallbackExpression record
+            ListExpr elements ->
+                List.all isCopySafeFallbackExpression elements
 
-        RecordAccessFunction _ ->
-            True
+            RecordAccess record _ ->
+                isCopySafeFallbackExpression record
 
-        _ ->
-            False
+            RecordAccessFunction _ ->
+                True
 
+            _ ->
+                False
 {-| Inner list shapes under single-arg wrappers (`Just`, `Ok`) plus top-level
 `_`, for multi-cons fallthrough checks on Maybe/Result cases.
 -}
@@ -1211,7 +1444,14 @@ isRestArrayPattern (Node _ pattern) =
             True
 
         AsPattern inner _ ->
-            isRestArrayPattern inner
+            -- Keep `xs as ys` / `_ as ys`. Exact `[] as name` needs a binding the
+            -- nested empty-guard path cannot reconstruct, so refuse the chain.
+            case Node.value (unwrapParenthesized inner) of
+                ListPattern [] ->
+                    False
+
+                _ ->
+                    isRestArrayPattern inner
 
         ParenthesizedPattern inner ->
             isRestArrayPattern inner
@@ -1404,6 +1644,10 @@ inserted at the body column; each peel uses +4 for the branch patterns and +8
 for the branch body (where a deeper `when` may start). Using `level+1` /
 `level+2` alone puts a nested `when` and its `Just` arm on the same column
 (invalid Gren layout for chains of three or more cons cells).
+
+Exact-length tails (`h1 :: h2 :: []`) cannot use `rest = []` inside a nested
+`Just` arm: Gren requires that `when` to cover every `Just` shape. The last
+peel therefore binds a synthetic rest and guards with `when rest is [] -> ...`.
 -}
 nestedPopWrap : String -> List (Node Pattern) -> Node Pattern -> String -> Node Expression -> ModuleContext -> { prefix : String, suffix : String }
 nestedPopWrap shortMatchFallback heads finalRest firstRestName body context =
@@ -1417,6 +1661,10 @@ nestedPopWrap shortMatchFallback heads finalRest firstRestName body context =
         indent n =
             String.repeat (max 0 (bodyCol - 1 + n * 4)) " "
 
+        exactEmptyRest : Bool
+        exactEmptyRest =
+            isEmptyListRest finalRest
+
         build : Int -> String -> List (Node Pattern) -> { prefix : String, suffix : String }
         build level restName remaining =
             case remaining of
@@ -1425,14 +1673,21 @@ nestedPopWrap shortMatchFallback heads finalRest firstRestName body context =
 
                 head :: more ->
                     let
+                        isLast : Bool
+                        isLast =
+                            List.isEmpty more
+
                         nextRest : String
                         nextRest =
-                            case more of
-                                [] ->
+                            if isLast then
+                                if exactEmptyRest then
+                                    restName ++ "_n" ++ String.fromInt level ++ "_e"
+
+                                else
                                     restPatternText context finalRest
 
-                                _ ->
-                                    restName ++ "_n" ++ String.fromInt level
+                            else
+                                restName ++ "_n" ++ String.fromInt level
 
                         headText : String
                         headText =
@@ -1452,6 +1707,10 @@ nestedPopWrap shortMatchFallback heads finalRest firstRestName body context =
                         bodyIndent =
                             2 * level + 2
 
+                        needsEmptyGuard : Bool
+                        needsEmptyGuard =
+                            isLast && exactEmptyRest
+
                         open : String
                         open =
                             "when Array.popFirst "
@@ -1464,10 +1723,31 @@ nestedPopWrap shortMatchFallback heads finalRest firstRestName body context =
                                 ++ nextRest
                                 ++ " } ->\n"
                                 ++ indent bodyIndent
+                                ++ (if needsEmptyGuard then
+                                        "when "
+                                            ++ nextRest
+                                            ++ " is\n"
+                                            ++ indent (bodyIndent + 1)
+                                            ++ "[] ->\n"
+                                            ++ indent (bodyIndent + 2)
+
+                                    else
+                                        ""
+                                   )
 
                         close : String
                         close =
-                            "\n"
+                            (if needsEmptyGuard then
+                                "\n"
+                                    ++ indent (bodyIndent + 1)
+                                    ++ "_ ->\n"
+                                    ++ indent (bodyIndent + 2)
+                                    ++ shortMatchFallback
+
+                             else
+                                ""
+                            )
+                                ++ "\n"
                                 ++ indent branchIndent
                                 ++ "Nothing ->\n"
                                 ++ indent bodyIndent
@@ -1478,6 +1758,18 @@ nestedPopWrap shortMatchFallback heads finalRest firstRestName body context =
                     }
     in
     build 0 firstRestName heads
+
+
+{-| True when the pattern is a fixed empty list (`[]`), after parentheses.
+-}
+isEmptyListRest : Node Pattern -> Bool
+isEmptyListRest patternNode =
+    case Node.value (unwrapParenthesized patternNode) of
+        ListPattern [] ->
+            True
+
+        _ ->
+            False
 
 
 {-| Render a pattern as Gren text for injection into synthetic branches.
@@ -2158,11 +2450,21 @@ collectCtorEmbeddedUnconsCase cases ( patternNode, body ) context =
     case Node.value patternNode of
         NamedPattern qualifiedName args ->
             let
-                shortMatchFallback : String
-                shortMatchFallback =
+                -- Empty list after widening `Ctor listName` (Nothing of popFirst).
+                emptyListFallback : String
+                emptyListFallback =
                     embeddedUnconsFallback
                         "elm-to-gren: embedded uncons did not match"
                         qualifiedName.name
+                        cases
+                        context
+
+                -- Longer-than-exact tails after `x :: []` peels. Prefer `_`, not
+                -- a sibling `Ctor []` body (that arm is for the empty list only).
+                lengthMismatchFallback : String
+                lengthMismatchFallback =
+                    nothingMatchFallback
+                        "elm-to-gren: embedded uncons did not match"
                         cases
                         context
 
@@ -2173,7 +2475,6 @@ collectCtorEmbeddedUnconsCase cases ( patternNode, body ) context =
                 pad : Int -> String
                 pad n =
                     String.repeat (max 0 n) " "
-
                 foldArg : Node Pattern -> { ctx : ModuleContext, prefix : String, suffix : String } -> { ctx : ModuleContext, prefix : String, suffix : String }
                 foldArg arg acc =
                     case parseConsChain (unwrapParenthesized arg) of
@@ -2195,13 +2496,28 @@ collectCtorEmbeddedUnconsCase cases ( patternNode, body ) context =
                                         listName =
                                             syntheticRestName argRange ++ "_list"
 
+                                        exactEmptyRest : Bool
+                                        exactEmptyRest =
+                                            isEmptyListRest chain.rest
+
+                                        -- Nested when arms are isolated from sibling case branches,
+                                        -- so `rest = []` is non-exhaustive for longer lists. Bind a
+                                        -- synthetic rest and guard with `when rest is []` instead.
                                         firstRest : String
                                         firstRest =
                                             if List.isEmpty moreHeads then
-                                                restPatternText context chain.rest
+                                                if exactEmptyRest then
+                                                    syntheticRestName argRange ++ "_e"
+
+                                                else
+                                                    restPatternText context chain.rest
 
                                             else
                                                 syntheticRestName argRange
+
+                                        needsEmptyGuard : Bool
+                                        needsEmptyGuard =
+                                            List.isEmpty moreHeads && exactEmptyRest
 
                                         -- `when` at bodyCol; branches at +4; bodies at +8.
                                         openFirst : String
@@ -2216,14 +2532,35 @@ collectCtorEmbeddedUnconsCase cases ( patternNode, body ) context =
                                                 ++ firstRest
                                                 ++ " } ->\n"
                                                 ++ pad (bodyCol - 1 + 8)
+                                                ++ (if needsEmptyGuard then
+                                                        "when "
+                                                            ++ firstRest
+                                                            ++ " is\n"
+                                                            ++ pad (bodyCol - 1 + 12)
+                                                            ++ "[] ->\n"
+                                                            ++ pad (bodyCol - 1 + 16)
+
+                                                    else
+                                                        ""
+                                                   )
 
                                         closeFirst : String
                                         closeFirst =
-                                            "\n"
+                                            (if needsEmptyGuard then
+                                                "\n"
+                                                    ++ pad (bodyCol - 1 + 12)
+                                                    ++ "_ ->\n"
+                                                    ++ pad (bodyCol - 1 + 16)
+                                                    ++ lengthMismatchFallback
+
+                                             else
+                                                ""
+                                            )
+                                                ++ "\n"
                                                 ++ pad (bodyCol - 1 + 4)
                                                 ++ "Nothing ->\n"
                                                 ++ pad (bodyCol - 1 + 8)
-                                                ++ shortMatchFallback
+                                                ++ emptyListFallback
 
                                         deeper : { prefix : String, suffix : String }
                                         deeper =
@@ -2231,8 +2568,9 @@ collectCtorEmbeddedUnconsCase cases ( patternNode, body ) context =
                                                 { prefix = "", suffix = "" }
 
                                             else
-                                                nestedPopWrap shortMatchFallback moreHeads chain.rest firstRest body context
-
+                                                -- Nested peels are past the empty-list case; length errors
+                                                -- must use `_` / todo, never a sibling `Ctor []` body.
+                                                nestedPopWrap lengthMismatchFallback moreHeads chain.rest firstRest body context
                                         withArgPatterns : ModuleContext
                                         withArgPatterns =
                                             acc.ctx

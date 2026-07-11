@@ -1,0 +1,9 @@
+module Ugly exposing (add,pair)
+
+add:Int->Int->Int
+add a b=
+    a+b
+
+
+pair : { first : Int , second : Int }
+pair={first=1,second=2}

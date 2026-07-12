@@ -31,7 +31,12 @@ checks =
     , check "Tuple adapter contains record-pair semantics" tupleAdapterIsSemantic
     , check "JSON encoding adapter converts pair field names" jsonEncodeAdapterIsSemantic
     , check "List and Array adapters preserve collection conversions" listAndArrayAdaptersAreSemantic
+    , check "Char adapter is registered and discoverable from catalog targets" charAdapterCatalogWiring
     , check "Char adapter routes case conversion through String" charAdapterIsSemantic
+    , check "Browser adapter rewrites TEA pairs for element/document/application" browserAdapterIsSemantic
+    , check "Html classList and event adapters convert pair records" htmlAdaptersAreSemantic
+    , check "Bytes.Encode and Random.step adapters bridge Gren record shapes" bytesAndRandomAdaptersAreSemantic
+    , check "browser catalog targets discover nested Compat adapters" browserAdaptersCatalogWiring
     , check "mapping lexical validation matches the JSON contract" lexicalValidationWorks
     ]
 
@@ -265,6 +270,81 @@ listAndArrayAdaptersAreSemantic =
         && String.contains "toList values =" (Adapter.sourceFor ArrayAdapter)
 
 
+{-| Catalog-shaped Char mapping must discover the Compat adapter, normalize
+from FQ symbols, and generate a single module with the expected path.
+Kernel `Char` alone must not pull the adapter in (values are FQ, target is not).
+-}
+charAdapterCatalogWiring : Bool
+charAdapterCatalogWiring =
+    let
+        charCatalogMapping =
+            { source = "Char"
+            , target = "Char"
+            , values =
+                Dict.empty
+                    |> Dict.set "toLower" "ElmToGren.Compat.Char.toLower"
+                    |> Dict.set "toUpper" "ElmToGren.Compat.Char.toUpper"
+                    |> Dict.set "toLocaleLower" "ElmToGren.Compat.Char.toLocaleLower"
+                    |> Dict.set "toLocaleUpper" "ElmToGren.Compat.Char.toLocaleUpper"
+            , types = Dict.singleton "Char" "Char"
+            }
+
+        bareCharMapping =
+            { source = "Char"
+            , target = "Char"
+            , values = Dict.empty
+            , types = Dict.singleton "Char" "Char"
+            }
+
+        registered =
+            Array.any (\adapterId -> adapterId == CharAdapter) Adapter.all
+    in
+    registered
+        && Adapter.moduleName CharAdapter
+            == "ElmToGren.Compat.Char"
+        && Adapter.adapterModuleForTarget "ElmToGren.Compat.Char.toLower"
+            == Just "ElmToGren.Compat.Char"
+        && Adapter.adapterModuleForTarget "ElmToGren.Compat.Char.toLocaleUpper"
+            == Just "ElmToGren.Compat.Char"
+        && Adapter.adapterIdForTarget "ElmToGren.Compat.Char.toUpper"
+            == Just CharAdapter
+        && Adapter.adapterIdForTarget "Char"
+            == Nothing
+        && Adapter.requiredForModules [ charCatalogMapping ]
+            == [ CharAdapter ]
+        && Adapter.requiredForModules [ bareCharMapping ]
+            == []
+        && Adapter.normalize "Char"
+            == Ok CharAdapter
+        && Adapter.normalize "ElmToGren.Compat.Char.toLocaleLower"
+            == Ok CharAdapter
+        && when Adapter.generateFromRequirements
+            [ "ElmToGren.Compat.Char.toLower"
+            , "char"
+            , "ElmToGren.Compat.Char.toUpper"
+            ]
+        is
+            Ok modules ->
+                Array.map .moduleName modules
+                    == [ "ElmToGren.Compat.Char" ]
+                    && when Array.get 0 modules is
+                        Just generated ->
+                            generated.relativePath
+                                == "ElmToGren/Compat/Char.gren"
+                                && String.contains
+                                    "module ElmToGren.Compat.Char exposing (toLower, toUpper, toLocaleLower, toLocaleUpper)"
+                                    generated.source
+
+                        Nothing ->
+                            False
+
+            Err _ ->
+                False
+
+
+{-| Generated Compat.Char must case via String kernel helpers and map locale
+variants onto the non-locale implementations (Gren has no locale Char API).
+-}
 charAdapterIsSemantic : Bool
 charAdapterIsSemantic =
     let
@@ -273,8 +353,175 @@ charAdapterIsSemantic =
     in
     String.contains "String.toLower (String.fromChar char)" source
         && String.contains "String.toUpper (String.fromChar char)" source
-        && String.contains "toLocaleLower" source
-        && String.contains "toLocaleUpper" source
+        && String.contains "String.popFirst" source
+        && String.contains "Just { first } ->" source
+        && String.contains "Nothing ->" source
+        && String.contains "toLocaleLower char =\n    toLower char" source
+        && String.contains "toLocaleUpper char =\n    toUpper char" source
+
+
+{-| Browser element/document/application must map Elm TEA pairs
+`{ first, second }` onto Gren `{ model, command }`.
+-}
+browserAdapterIsSemantic : Bool
+browserAdapterIsSemantic =
+    let
+        source =
+            Adapter.sourceFor BrowserAdapter
+    in
+    String.contains "exposing (element, document, application)" source
+        && String.contains "{ model = pair.first, command = pair.second }" source
+        && String.contains "Browser.element" source
+        && String.contains "Browser.document" source
+        && String.contains "Browser.application" source
+        && String.contains "\\flags url key -> teaPair (config.init flags url key)" source
+        && String.contains "onUrlRequest = config.onUrlRequest" source
+        && String.contains "onUrlChange = config.onUrlChange" source
+
+
+{-| classList maps pair records to `{ class, enabled }`; event helpers map
+pair decoders to Gren's named preventDefault/stopPropagation fields.
+-}
+htmlAdaptersAreSemantic : Bool
+htmlAdaptersAreSemantic =
+    let
+        attributes =
+            Adapter.sourceFor HtmlAttributesAdapter
+
+        events =
+            Adapter.sourceFor HtmlEventsAdapter
+    in
+    String.contains "{ class = pair.first" attributes
+        && String.contains ", enabled = pair.second" attributes
+        && String.contains "Html.Attributes.classList" attributes
+        && String.contains "preventDefault = pair.second" events
+        && String.contains "stopPropagation = pair.second" events
+        && String.contains "message = pair.first" events
+        && String.contains "Html.Events.preventDefaultOn" events
+        && String.contains "Html.Events.stopPropagationOn" events
+
+
+{-| Bytes.Encode.string routes through Bytes.fromString; Random.step rewrites
+Gren `{ value, seed }` into ported pair records.
+-}
+bytesAndRandomAdaptersAreSemantic : Bool
+bytesAndRandomAdaptersAreSemantic =
+    let
+        bytes =
+            Adapter.sourceFor BytesEncodeAdapter
+
+        random =
+            Adapter.sourceFor RandomAdapter
+    in
+    String.contains "Bytes.Encode.bytes (Bytes.fromString value)" bytes
+        && String.contains "Bytes.length (Bytes.fromString value)" bytes
+        && String.contains "first = result.value" random
+        && String.contains "second = result.seed" random
+        && String.contains "Random.step generator seed" random
+
+
+{-| Catalog-shaped browser/html/bytes targets must discover nested Compat
+modules (including multi-segment names) and emit the expected paths.
+-}
+browserAdaptersCatalogWiring : Bool
+browserAdaptersCatalogWiring =
+    let
+        browserMapping =
+            { source = "Browser"
+            , target = "Browser"
+            , values =
+                Dict.empty
+                    |> Dict.set "element" "ElmToGren.Compat.Browser.element"
+                    |> Dict.set "document" "ElmToGren.Compat.Browser.document"
+                    |> Dict.set "application" "ElmToGren.Compat.Browser.application"
+            , types = Dict.empty
+            }
+
+        htmlEventsMapping =
+            { source = "Html.Events"
+            , target = "Html.Events"
+            , values =
+                Dict.empty
+                    |> Dict.set "preventDefaultOn" "ElmToGren.Compat.Html.Events.preventDefaultOn"
+                    |> Dict.set "stopPropagationOn" "ElmToGren.Compat.Html.Events.stopPropagationOn"
+            , types = Dict.empty
+            }
+
+        svgEventsMapping =
+            { source = "Svg.Events"
+            , target = "Svg.Events"
+            , values =
+                Dict.empty
+                    |> Dict.set "preventDefaultOn" "ElmToGren.Compat.Html.Events.preventDefaultOn"
+            , types = Dict.empty
+            }
+
+        bytesMapping =
+            { source = "Bytes.Encode"
+            , target = "Bytes.Encode"
+            , values =
+                Dict.empty
+                    |> Dict.set "string" "ElmToGren.Compat.Bytes.Encode.string"
+                    |> Dict.set "getStringWidth" "ElmToGren.Compat.Bytes.Encode.getStringWidth"
+            , types = Dict.empty
+            }
+
+        attributesMapping =
+            { source = "Html.Attributes"
+            , target = "Html.Attributes"
+            , values = Dict.singleton "classList" "ElmToGren.Compat.Html.Attributes.classList"
+            , types = Dict.empty
+            }
+    in
+    Adapter.moduleName BrowserAdapter
+        == "ElmToGren.Compat.Browser"
+        && Adapter.moduleName BytesEncodeAdapter
+            == "ElmToGren.Compat.Bytes.Encode"
+        && Adapter.moduleName HtmlAttributesAdapter
+            == "ElmToGren.Compat.Html.Attributes"
+        && Adapter.moduleName HtmlEventsAdapter
+            == "ElmToGren.Compat.Html.Events"
+        && Adapter.adapterIdForTarget "ElmToGren.Compat.Browser.application"
+            == Just BrowserAdapter
+        && Adapter.adapterIdForTarget "ElmToGren.Compat.Bytes.Encode.string"
+            == Just BytesEncodeAdapter
+        && Adapter.adapterIdForTarget "ElmToGren.Compat.Html.Attributes.classList"
+            == Just HtmlAttributesAdapter
+        && Adapter.adapterIdForTarget "ElmToGren.Compat.Html.Events.preventDefaultOn"
+            == Just HtmlEventsAdapter
+        && Adapter.requiredForModules [ browserMapping ]
+            == [ BrowserAdapter ]
+        && Adapter.requiredForModules [ htmlEventsMapping ]
+            == [ HtmlEventsAdapter ]
+        && Adapter.requiredForModules [ svgEventsMapping ]
+            == [ HtmlEventsAdapter ]
+        && Adapter.requiredForModules [ bytesMapping ]
+            == [ BytesEncodeAdapter ]
+        && Adapter.requiredForModules [ attributesMapping ]
+            == [ HtmlAttributesAdapter ]
+        && when Adapter.generateFromRequirements
+            [ "ElmToGren.Compat.Browser.element"
+            , "ElmToGren.Compat.Bytes.Encode.string"
+            , "ElmToGren.Compat.Html.Attributes.classList"
+            , "ElmToGren.Compat.Html.Events.custom"
+            ]
+        is
+            Ok modules ->
+                Array.map .moduleName modules
+                    == [ "ElmToGren.Compat.Browser"
+                       , "ElmToGren.Compat.Bytes.Encode"
+                       , "ElmToGren.Compat.Html.Attributes"
+                       , "ElmToGren.Compat.Html.Events"
+                       ]
+                    && Array.map .relativePath modules
+                        == [ "ElmToGren/Compat/Browser.gren"
+                           , "ElmToGren/Compat/Bytes/Encode.gren"
+                           , "ElmToGren/Compat/Html/Attributes.gren"
+                           , "ElmToGren/Compat/Html/Events.gren"
+                           ]
+
+            Err _ ->
+                False
 
 
 lexicalValidationWorks : Bool

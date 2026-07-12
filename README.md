@@ -135,15 +135,21 @@ If `filter` had no mapping, the tool might still emit `List.filter` (or a half-r
 ## Ecosystem smoke tests
 
 `npm run test:ecosystem` ports 40 randomly selected (seeded) pure Elm packages
-whose direct dependencies stay within the supported platform set
+whose direct dependencies stay within the supported common platform set
 (`elm/core`, `elm/json`, `elm/time`, `elm/random`, `elm/bytes`, `elm/regex`,
 `elm/url`, `elm/parser`) and checks that each run completes with verification.
+
+`npm run test:ecosystem-browser` ports another 40 packages whose direct
+dependencies stay within the browser platform set (common set plus
+`elm/browser`, `elm/html`, `elm/svg`, `elm/virtual-dom`, `elm/http`, `elm/file`)
+and verifies each with `gren docs` on platform browser.
 
 ## Development
 
 ```sh
-npm run test:all        # unit, rule fixtures, e2e, ecosystem (network)
-npm run test:ecosystem  # 40 seeded pure packages from package.elm-lang.org
+npm run test:all               # unit, rule fixtures, e2e, ecosystem suites (network)
+npm run test:ecosystem         # 40 seeded pure packages from package.elm-lang.org
+npm run test:ecosystem-browser # 40 seeded browser-platform packages
 ```
 
 - `src/` — the Gren CLI (acquire, resolve, transform, format, emit, verify)

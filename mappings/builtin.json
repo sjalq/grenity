@@ -244,6 +244,7 @@
           "target": "Random",
           "values": {
             "list": "array",
+            "step": "ElmToGren.Compat.Random.step",
             "weighted": "ElmToGren.Compat.Random.weighted",
             "map4": "ElmToGren.Compat.Random.map4",
             "map5": "ElmToGren.Compat.Random.map5"
@@ -259,8 +260,16 @@
       "grenVersion": "7.4.2",
       "platform": "common",
       "modules": [
-        { "source": "Bytes", "target": "Bytes", "values": { "width": "length" }, "types": {} },
-        { "source": "Bytes.Encode", "target": "Bytes.Encode", "values": {}, "types": {} },
+        { "source": "Bytes", "target": "Bytes", "values": { "width": "length" }, "types": { "Bytes": "Bytes", "Endianness": "Endianness" } },
+        {
+          "source": "Bytes.Encode",
+          "target": "Bytes.Encode",
+          "values": {
+            "string": "ElmToGren.Compat.Bytes.Encode.string",
+            "getStringWidth": "ElmToGren.Compat.Bytes.Encode.getStringWidth"
+          },
+          "types": { "Encoder": "Encoder" }
+        },
         { "source": "Bytes.Decode", "target": "Bytes.Decode", "values": {}, "types": {} }
       ]
     },
@@ -281,7 +290,19 @@
       "grenVersion": "6.0.2",
       "platform": "browser",
       "modules": [
-        { "source": "Browser", "target": "Browser", "values": {}, "types": {} },
+        {
+          "source": "Browser",
+          "target": "Browser",
+          "values": {
+            "element": "ElmToGren.Compat.Browser.element",
+            "document": "ElmToGren.Compat.Browser.document",
+            "application": "ElmToGren.Compat.Browser.application"
+          },
+          "types": {
+            "Document": "Document",
+            "UrlRequest": "UrlRequest"
+          }
+        },
         { "source": "Browser.Dom", "target": "Browser.Dom", "values": {}, "types": {} },
         { "source": "Browser.Events", "target": "Browser.Events", "values": {}, "types": {} },
         { "source": "Browser.Navigation", "target": "Browser.Navigation", "values": {}, "types": {} }
@@ -294,9 +315,25 @@
       "grenVersion": "6.0.2",
       "platform": "browser",
       "modules": [
-        { "source": "Html", "target": "Html", "values": {}, "types": {} },
-        { "source": "Html.Attributes", "target": "Html.Attributes", "values": {}, "types": {} },
-        { "source": "Html.Events", "target": "Html.Events", "values": {}, "types": {} },
+        { "source": "Html", "target": "Html", "values": {}, "types": { "Html": "Html", "Attribute": "Attribute" } },
+        {
+          "source": "Html.Attributes",
+          "target": "Html.Attributes",
+          "values": {
+            "classList": "ElmToGren.Compat.Html.Attributes.classList"
+          },
+          "types": {}
+        },
+        {
+          "source": "Html.Events",
+          "target": "Html.Events",
+          "values": {
+            "preventDefaultOn": "ElmToGren.Compat.Html.Events.preventDefaultOn",
+            "stopPropagationOn": "ElmToGren.Compat.Html.Events.stopPropagationOn",
+            "custom": "ElmToGren.Compat.Html.Events.custom"
+          },
+          "types": {}
+        },
         { "source": "Html.Keyed", "target": "Html.Keyed", "values": {}, "types": {} },
         { "source": "Html.Lazy", "target": "Html.Lazy", "values": {}, "types": {} }
       ]
@@ -308,9 +345,18 @@
       "grenVersion": "6.0.2",
       "platform": "browser",
       "modules": [
-        { "source": "Svg", "target": "Svg", "values": {}, "types": {} },
+        { "source": "Svg", "target": "Svg", "values": {}, "types": { "Svg": "Svg", "Attribute": "Attribute" } },
         { "source": "Svg.Attributes", "target": "Svg.Attributes", "values": {}, "types": {} },
-        { "source": "Svg.Events", "target": "Svg.Events", "values": {}, "types": {} },
+        {
+          "source": "Svg.Events",
+          "target": "Svg.Events",
+          "values": {
+            "preventDefaultOn": "ElmToGren.Compat.Html.Events.preventDefaultOn",
+            "stopPropagationOn": "ElmToGren.Compat.Html.Events.stopPropagationOn",
+            "custom": "ElmToGren.Compat.Html.Events.custom"
+          },
+          "types": {}
+        },
         { "source": "Svg.Keyed", "target": "Svg.Keyed", "values": {}, "types": {} },
         { "source": "Svg.Lazy", "target": "Svg.Lazy", "values": {}, "types": {} }
       ]

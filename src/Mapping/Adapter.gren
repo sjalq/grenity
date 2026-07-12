@@ -34,8 +34,12 @@ all : Array AdapterId
 all =
     [ ArrayAdapter
     , BasicsAdapter
+    , BrowserAdapter
+    , BytesEncodeAdapter
     , CharAdapter
     , DictAdapter
+    , HtmlAttributesAdapter
+    , HtmlEventsAdapter
     , JsonDecodeAdapter
     , JsonEncodeAdapter
     , ListAdapter
@@ -186,11 +190,23 @@ sourceFor adapterId =
         BasicsAdapter ->
             basicsSource
 
+        BrowserAdapter ->
+            browserSource
+
+        BytesEncodeAdapter ->
+            bytesEncodeSource
+
         CharAdapter ->
             charSource
 
         DictAdapter ->
             dictSource
+
+        HtmlAttributesAdapter ->
+            htmlAttributesSource
+
+        HtmlEventsAdapter ->
+            htmlEventsSource
 
         JsonDecodeAdapter ->
             jsonDecodeSource
@@ -221,6 +237,163 @@ sourceFor adapterId =
 
         TupleAdapter ->
             tupleSource
+
+
+{-| Elm TEA returns `(model, Cmd msg)` which ports to `{ first, second }`.
+Gren's Browser.element/document/application expect `{ model, command }`.
+-}
+browserSource : String
+browserSource =
+    """
+module ElmToGren.Compat.Browser exposing (element, document, application)
+
+import Browser
+import Html exposing (Html)
+
+
+teaPair : { first : model, second : Cmd msg } -> { model : model, command : Cmd msg }
+teaPair pair =
+    { model = pair.first, command = pair.second }
+
+
+element :
+    { init : flags -> { first : model, second : Cmd msg }
+    , view : model -> Html msg
+    , update : msg -> model -> { first : model, second : Cmd msg }
+    , subscriptions : model -> Sub msg
+    }
+    -> Program flags model msg
+element config =
+    Browser.element
+        { init = \\flags -> teaPair (config.init flags)
+        , view = config.view
+        , update = \\msg model -> teaPair (config.update msg model)
+        , subscriptions = config.subscriptions
+        }
+
+
+document :
+    { init : flags -> { first : model, second : Cmd msg }
+    , view : model -> Browser.Document msg
+    , update : msg -> model -> { first : model, second : Cmd msg }
+    , subscriptions : model -> Sub msg
+    }
+    -> Program flags model msg
+document config =
+    Browser.document
+        { init = \\flags -> teaPair (config.init flags)
+        , view = config.view
+        , update = \\msg model -> teaPair (config.update msg model)
+        , subscriptions = config.subscriptions
+        }
+
+
+application config =
+    Browser.application
+        { init = \\flags url key -> teaPair (config.init flags url key)
+        , view = config.view
+        , update = \\msg model -> teaPair (config.update msg model)
+        , subscriptions = config.subscriptions
+        , onUrlRequest = config.onUrlRequest
+        , onUrlChange = config.onUrlChange
+        }
+"""
+
+
+{-| Elm encodes UTF-8 strings via Bytes.Encode.string; Gren moved that to
+Bytes.fromString plus Bytes.Encode.bytes.
+-}
+bytesEncodeSource : String
+bytesEncodeSource =
+    """
+module ElmToGren.Compat.Bytes.Encode exposing (string, getStringWidth)
+
+import Bytes
+import Bytes.Encode exposing (Encoder)
+
+
+string : String -> Encoder
+string value =
+    Bytes.Encode.bytes (Bytes.fromString value)
+
+
+getStringWidth : String -> Int
+getStringWidth value =
+    Bytes.length (Bytes.fromString value)
+"""
+
+
+{-| Elm's preventDefaultOn/stopPropagationOn decode `(msg, Bool)` tuples.
+After the tuple rewrite those become `{ first, second }`; Gren expects
+named fields `{ message, preventDefault }` / `{ message, stopPropagation }`.
+-}
+htmlAttributesSource : String
+htmlAttributesSource =
+    """
+module ElmToGren.Compat.Html.Attributes exposing (classList)
+
+import Array exposing (Array)
+import Html exposing (Attribute)
+import Html.Attributes
+
+
+classList : Array { first : String, second : Bool } -> Attribute msg
+classList items =
+    Html.Attributes.classList
+        (Array.map
+            (\\pair ->
+                { class = pair.first
+                , enabled = pair.second
+                }
+            )
+            items
+        )
+"""
+
+
+htmlEventsSource : String
+htmlEventsSource =
+    """
+module ElmToGren.Compat.Html.Events exposing (preventDefaultOn, stopPropagationOn, custom)
+
+import Html exposing (Attribute)
+import Html.Events
+import Json.Decode as Decode
+
+
+preventDefaultOn : String -> Decode.Decoder { first : msg, second : Bool } -> Attribute msg
+preventDefaultOn event decoder =
+    Html.Events.preventDefaultOn event
+        (Decode.map
+            (\\pair ->
+                { message = pair.first
+                , preventDefault = pair.second
+                }
+            )
+            decoder
+        )
+
+
+stopPropagationOn : String -> Decode.Decoder { first : msg, second : Bool } -> Attribute msg
+stopPropagationOn event decoder =
+    Html.Events.stopPropagationOn event
+        (Decode.map
+            (\\pair ->
+                { message = pair.first
+                , stopPropagation = pair.second
+                }
+            )
+            decoder
+        )
+
+
+custom :
+    String
+    -> Decode.Decoder { message : msg, stopPropagation : Bool, preventDefault : Bool }
+    -> Attribute msg
+custom event decoder =
+    Html.Events.custom event decoder
+"""
 
 
 arraySource : String
@@ -562,10 +735,19 @@ map5 fn ta tb tc td te =
 randomSource : String
 randomSource =
     """
-module ElmToGren.Compat.Random exposing (weighted, map4, map5)
+module ElmToGren.Compat.Random exposing (step, weighted, map4, map5)
 
 import Array exposing (Array)
-import Random exposing (Generator)
+import Random exposing (Generator, Seed)
+
+
+step : Generator a -> Seed -> { first : a, second : Seed }
+step generator seed =
+    let
+        result =
+            Random.step generator seed
+    in
+    { first = result.value, second = result.seed }
 
 
 weighted : { first : Float, second : a } -> Array { first : Float, second : a } -> Generator a

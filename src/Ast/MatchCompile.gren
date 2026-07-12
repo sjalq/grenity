@@ -3,23 +3,24 @@ module Ast.MatchCompile exposing
     , hasUnportedListPatterns
     )
 
-{-| Phase 2 host match compiler.
+{-| Host match compiler (Phase 2 + 3).
 
-Rewrites pure list/cons `case` expressions into Gren-total length + `popFirst`
-dispatch (the same strategy the elm-review pure-list path used, but as AST→AST
-so catalog name-sub and print compose without range string paste).
+Rewrites list/cons `case` expressions into Gren-total forms:
 
-Pure list shape: every arm is `[]`, fixed `[a,b]`, `h1 :: h2 :: … :: rest`
-(with var/`_` heads and simple rest), or catch-all (`_` / var). Nested
-ctor/tuple heads are refused and left for the edit-path fallback.
+1. **Pure list** (var/`_` heads): `Array.length` dispatch + nested `popFirst`
+2. **Array pop** (named heads, fixed lists, multi-cons): wrap scrutinee in
+   `Array.popFirst`, rewrite arms to `Nothing` / `Just` + peels
+3. **Maybe uncons**: `Maybe.map Array.popFirst`, rewrite `Just` inners
+4. **Result uncons**: `Result.map Array.popFirst`, rewrite `Ok` inners
+
+Anything left with raw `PatCons` falls back to the range-edit path.
 -}
 
 import Array exposing (Array)
-import Ast.Types as Types exposing
+import Ast.Types exposing
     ( CaseArm
     , Declaration(..)
     , Expr(..)
-    , Field
     , File
     , LetDecl(..)
     , NamedRef
@@ -39,6 +40,12 @@ type alias PureListArm =
     }
 
 
+type alias ConsChain =
+    { heads : Array Pattern
+    , rest : Pattern
+    }
+
+
 compile : File -> File
 compile file =
     { file
@@ -46,9 +53,6 @@ compile file =
     }
 
 
-{-| True when any list-cons *pattern* remains after compile. Those still need
-the edit-path multi-cons lattice (or a later match-compiler expansion).
--}
 hasUnportedListPatterns : File -> Bool
 hasUnportedListPatterns file =
     Array.any declarationHasUnported file.declarations
@@ -61,10 +65,7 @@ compileDeclaration : Declaration -> Declaration
 compileDeclaration declaration =
     when declaration is
         DeclFunction fn ->
-            DeclFunction
-                { fn
-                    | expression = compileExpr fn.expression
-                }
+            DeclFunction { fn | expression = compileExpr fn.expression }
 
         DeclDestructure { pattern = pattern, expression = expression } ->
             DeclDestructure
@@ -173,10 +174,7 @@ compileLetDecl : LetDecl -> LetDecl
 compileLetDecl declaration =
     when declaration is
         LetFunction fn ->
-            LetFunction
-                { fn
-                    | expression = compileExpr fn.expression
-                }
+            LetFunction { fn | expression = compileExpr fn.expression }
 
         LetDestructure { pattern = pattern, expression = expression } ->
             LetDestructure
@@ -185,7 +183,7 @@ compileLetDecl declaration =
                 }
 
 
--- PURE LIST DETECTION --------------------------------------------------------
+-- DISPATCH -------------------------------------------------------------------
 
 
 tryCompileListCase : { expression : Expr, cases : Array CaseArm } -> Maybe Expr
@@ -195,7 +193,20 @@ tryCompileListCase caseBlock =
             Just rewritten
 
         Nothing ->
-            tryPeelOnceCase caseBlock
+            when tryArrayPopCase caseBlock is
+                Just rewritten ->
+                    Just rewritten
+
+                Nothing ->
+                    when tryMaybeUnconsCase caseBlock is
+                        Just rewritten ->
+                            Just rewritten
+
+                        Nothing ->
+                            tryResultUnconsCase caseBlock
+
+
+-- 1. PURE LIST (length dispatch) ---------------------------------------------
 
 
 tryPureListCase : { expression : Expr, cases : Array CaseArm } -> Maybe Expr
@@ -208,268 +219,11 @@ tryPureListCase caseBlock =
             parsed =
                 Array.mapAndKeepJust parsePureListArm caseBlock.cases
         in
-        if Array.length parsed /= Array.length caseBlock.cases then
-            Nothing
-
-        else if Array.isEmpty parsed then
+        if Array.length parsed /= Array.length caseBlock.cases || Array.isEmpty parsed then
             Nothing
 
         else
             Just (renderPureListCase caseBlock.expression parsed)
-
-
-{-| Single-depth cons with named heads (`Nothing :: rest`, `Just x :: _`) plus
-`[]` / catch-all. Peels once with `Array.popFirst`, then matches the head.
--}
-tryPeelOnceCase : { expression : Expr, cases : Array CaseArm } -> Maybe Expr
-tryPeelOnceCase caseBlock =
-    if not (isPeelOnceShapeCase caseBlock.cases) then
-        Nothing
-
-    else
-        Just (renderPeelOnceCase caseBlock.expression caseBlock.cases)
-
-
-isPeelOnceShapeCase : Array CaseArm -> Bool
-isPeelOnceShapeCase arms =
-    Array.any isListShapeMatch (Array.map .pattern arms)
-        && Array.all isPeelOnceArm arms
-
-
-isPeelOnceArm : CaseArm -> Bool
-isPeelOnceArm arm =
-    when arm.pattern is
-        PatAll ->
-            True
-
-        PatVar _ ->
-            True
-
-        PatList members ->
-            Array.isEmpty members
-
-        PatCons { head = head, tail = tail } ->
-            -- Exactly one cons (not h1 :: h2 :: …).
-            not (isConsPattern tail)
-                && isPeelOnceHead head
-                && isSimpleRest tail
-
-        PatAs { pattern = inner } ->
-            isPeelOnceArm { pattern = inner, body = arm.body }
-
-        _ ->
-            False
-
-
-isConsPattern : Pattern -> Bool
-isConsPattern pattern =
-    when pattern is
-        PatCons _ ->
-            True
-
-        PatAs { pattern = inner } ->
-            isConsPattern inner
-
-        _ ->
-            False
-
-
-isPeelOnceHead : Pattern -> Bool
-isPeelOnceHead pattern =
-    when pattern is
-        PatVar _ ->
-            True
-
-        PatAll ->
-            True
-
-        PatNamed { arguments = args } ->
-            Array.all isSimpleListHead args
-
-        PatAs { pattern = inner } ->
-            isPeelOnceHead inner
-
-        _ ->
-            False
-
-
-renderPeelOnceCase : Expr -> Array CaseArm -> Expr
-renderPeelOnceCase scrutinee arms =
-    let
-        scrutName =
-            "list_scrut_elmToGren"
-
-        popped =
-            "list_pop_elmToGren"
-
-        emptyArms =
-            arms
-                |> Array.mapAndKeepJust
-                    (\arm ->
-                        when arm.pattern is
-                            PatList members ->
-                                if Array.isEmpty members then
-                                    Just
-                                        { pattern =
-                                            PatNamed
-                                                { ref = { moduleName = Nothing, name = "Nothing" }
-                                                , arguments = []
-                                                }
-                                        , body = arm.body
-                                        }
-
-                                else
-                                    Nothing
-
-                            _ ->
-                                Nothing
-                    )
-
-        -- Default empty → Nothing if no [] arm (shouldn't happen for total cases).
-        nothingArm =
-            if Array.isEmpty emptyArms then
-                [ { pattern =
-                        PatNamed
-                            { ref = { moduleName = Nothing, name = "Nothing" }
-                            , arguments = []
-                            }
-                  , body =
-                        ExprApplication
-                            [ ExprVar { moduleName = Just "Debug", name = "todo" }
-                            , ExprString "elm-to-gren: empty list arm missing"
-                            ]
-                  }
-                ]
-
-            else
-                emptyArms
-
-        consArms =
-            arms
-                |> Array.mapAndKeepJust
-                    (\arm ->
-                        when peelCons arm.pattern is
-                            Nothing ->
-                                when arm.pattern is
-                                    PatAll ->
-                                        Just
-                                            { pattern = PatAll
-                                            , body = arm.body
-                                            }
-
-                                    PatVar name ->
-                                        Just
-                                            { pattern = PatVar name
-                                            , body = arm.body
-                                            }
-
-                                    _ ->
-                                        Nothing
-
-                            Just { head = head, tail = tail, asName = asName } ->
-                                let
-                                    headMatch =
-                                        { pattern = head
-                                        , body =
-                                            finishPeelBody
-                                                scrutName
-                                                popped
-                                                tail
-                                                asName
-                                                arm.body
-                                        }
-                                in
-                                Just headMatch
-                    )
-
-        -- `Just popped -> when popped.first is <cons arms…>`
-        justBranchBody =
-            ExprCase
-                { expression =
-                    ExprAccess
-                        { record = varLocal popped
-                        , field = "first"
-                        }
-                , cases = consArms
-                }
-
-        justArm =
-            { pattern =
-                PatNamed
-                    { ref = { moduleName = Nothing, name = "Just" }
-                    , arguments = [ PatVar popped ]
-                    }
-            , body = justBranchBody
-            }
-    in
-    ExprLet
-        { declarations =
-            [ LetFunction
-                { name = scrutName
-                , arguments = []
-                , expression = scrutinee
-                }
-            ]
-        , expression =
-            ExprCase
-                { expression =
-                    ExprApplication
-                        [ ExprVar { moduleName = Just "Array", name = "popFirst" }
-                        , varLocal scrutName
-                        ]
-                , cases = Array.pushLast justArm nothingArm
-                }
-        }
-
-
-type alias PeeledCons =
-    { head : Pattern
-    , tail : Pattern
-    , asName : Maybe String
-    }
-
-
-peelCons : Pattern -> Maybe PeeledCons
-peelCons pattern =
-    when pattern is
-        PatCons { head = head, tail = tail } ->
-            Just { head = head, tail = tail, asName = Nothing }
-
-        PatAs { pattern = inner, name = asName } ->
-            when peelCons inner is
-                Just peeled ->
-                    Just { peeled | asName = Just asName }
-
-                Nothing ->
-                    Nothing
-
-        _ ->
-            Nothing
-
-
-finishPeelBody : String -> String -> Pattern -> Maybe String -> Expr -> Expr
-finishPeelBody scrutName popped tail asName body =
-    let
-        restExpr =
-            ExprAccess
-                { record = varLocal popped
-                , field = "rest"
-                }
-
-        withRest =
-            when simpleRestName tail is
-                Just name ->
-                    wrapLetBind name restExpr body
-
-                Nothing ->
-                    body
-    in
-    when asName is
-        Just name ->
-            wrapLetBind name (varLocal scrutName) withRest
-
-        Nothing ->
-            withRest
 
 
 isPureListShapeCase : Array CaseArm -> Bool
@@ -506,7 +260,7 @@ isPureListShapePattern pattern =
         PatList members ->
             Array.all isSimpleListHead members
 
-        PatCons { head = head, tail = tail } ->
+        PatCons _ ->
             when parseConsChain pattern is
                 Just chain ->
                     Array.all isSimpleListHead chain.heads
@@ -571,12 +325,6 @@ isSimpleRest pattern =
             False
 
 
-type alias ConsChain =
-    { heads : Array Pattern
-    , rest : Pattern
-    }
-
-
 parseConsChain : Pattern -> Maybe ConsChain
 parseConsChain pattern =
     when pattern is
@@ -589,10 +337,7 @@ parseConsChain pattern =
                         }
 
                 Nothing ->
-                    Just
-                        { heads = [ head ]
-                        , rest = tail
-                        }
+                    Just { heads = [ head ], rest = tail }
 
         _ ->
             Nothing
@@ -602,26 +347,10 @@ parsePureListArm : CaseArm -> Maybe PureListArm
 parsePureListArm arm =
     when arm.pattern is
         PatAll ->
-            Just
-                { minLength = 0
-                , isOpen = True
-                , isCatchAll = True
-                , heads = []
-                , restName = Nothing
-                , asName = Nothing
-                , body = arm.body
-                }
+            Just (catchAllArm Nothing arm.body)
 
         PatVar name ->
-            Just
-                { minLength = 0
-                , isOpen = True
-                , isCatchAll = True
-                , heads = []
-                , restName = Nothing
-                , asName = Just name
-                , body = arm.body
-                }
+            Just (catchAllArm (Just name) arm.body)
 
         PatList members ->
             Just
@@ -646,26 +375,10 @@ parsePureListArm arm =
                 Nothing ->
                     when inner is
                         PatAll ->
-                            Just
-                                { minLength = 0
-                                , isOpen = True
-                                , isCatchAll = True
-                                , heads = []
-                                , restName = Nothing
-                                , asName = Just asName
-                                , body = arm.body
-                                }
+                            Just (catchAllArm (Just asName) arm.body)
 
                         PatVar name ->
-                            Just
-                                { minLength = 0
-                                , isOpen = True
-                                , isCatchAll = True
-                                , heads = []
-                                , restName = Nothing
-                                , asName = Just name
-                                , body = arm.body
-                                }
+                            Just (catchAllArm (Just name) arm.body)
 
                         PatList members ->
                             Just
@@ -683,6 +396,18 @@ parsePureListArm arm =
 
         _ ->
             Nothing
+
+
+catchAllArm : Maybe String -> Expr -> PureListArm
+catchAllArm asName body =
+    { minLength = 0
+    , isOpen = True
+    , isCatchAll = True
+    , heads = []
+    , restName = Nothing
+    , asName = asName
+    , body = body
+    }
 
 
 consChainToArm : Maybe String -> Expr -> ConsChain -> Maybe PureListArm
@@ -726,9 +451,6 @@ simpleHeadName pattern =
         PatVar name ->
             name
 
-        PatAll ->
-            "_"
-
         _ ->
             "_"
 
@@ -743,11 +465,7 @@ simpleRestName pattern =
             Nothing
 
         PatList members ->
-            if Array.isEmpty members then
-                Nothing
-
-            else
-                Nothing
+            Nothing
 
         PatAs { pattern = inner, name = asName } ->
             when simpleRestName inner is
@@ -759,9 +477,6 @@ simpleRestName pattern =
 
         _ ->
             Nothing
-
-
--- RENDER ---------------------------------------------------------------------
 
 
 renderPureListCase : Expr -> Array PureListArm -> Expr
@@ -785,7 +500,7 @@ renderPureListCase scrutinee arms =
                             |> Maybe.map
                                 (\arm ->
                                     { pattern = PatInt len
-                                    , body = renderArmBody scrutName arm
+                                    , body = renderPureArmBody scrutName arm
                                     }
                                 )
                     )
@@ -795,7 +510,7 @@ renderPureListCase scrutinee arms =
                 Just arm ->
                     if arm.isOpen || arm.isCatchAll then
                         [ { pattern = PatAll
-                          , body = renderArmBody scrutName arm
+                          , body = renderPureArmBody scrutName arm
                           }
                         ]
 
@@ -804,17 +519,6 @@ renderPureListCase scrutinee arms =
 
                 Nothing ->
                     []
-
-        lengthWhen =
-            ExprCase
-                { expression =
-                    ExprApplication
-                        [ ExprVar { moduleName = Just "Array", name = "length" }
-                        , ExprVar { moduleName = Nothing, name = scrutName }
-                        ]
-                -- Gren Array.append a b == b ++ a; flatten keeps left-to-right order.
-                , cases = Array.flatten [ lengthArms, openTail ]
-                }
     in
     ExprLet
         { declarations =
@@ -824,7 +528,15 @@ renderPureListCase scrutinee arms =
                 , expression = scrutinee
                 }
             ]
-        , expression = lengthWhen
+        , expression =
+            ExprCase
+                { expression =
+                    ExprApplication
+                        [ ExprVar { moduleName = Just "Array", name = "length" }
+                        , varLocal scrutName
+                        ]
+                , cases = Array.flatten [ lengthArms, openTail ]
+                }
         }
 
 
@@ -850,8 +562,8 @@ armMatchesLength len arm =
         len == arm.minLength
 
 
-renderArmBody : String -> PureListArm -> Expr
-renderArmBody scrutName arm =
+renderPureArmBody : String -> PureListArm -> Expr
+renderPureArmBody scrutName arm =
     if arm.isCatchAll then
         when arm.asName is
             Just name ->
@@ -864,11 +576,11 @@ renderArmBody scrutName arm =
         arm.body
 
     else
-        bindHeads arm scrutName arm.heads 0 scrutName
+        bindSimpleHeads arm scrutName arm.heads 0 scrutName
 
 
-bindHeads : PureListArm -> String -> Array String -> Int -> String -> Expr
-bindHeads arm originalScrut heads depth source =
+bindSimpleHeads : PureListArm -> String -> Array String -> Int -> String -> Expr
+bindSimpleHeads arm originalScrut heads depth source =
     when Array.popFirst heads is
         Nothing ->
             let
@@ -899,12 +611,8 @@ bindHeads arm originalScrut heads depth source =
                     let
                         bindRest =
                             wrapLetBind restN
-                                (ExprAccess
-                                    { record = varLocal popped
-                                    , field = "rest"
-                                    }
-                                )
-                                (bindHeads arm originalScrut more (depth + 1) restN)
+                                (access (varLocal popped) "rest")
+                                (bindSimpleHeads arm originalScrut more (depth + 1) restN)
 
                         bindHead =
                             if headName == "_" then
@@ -912,11 +620,7 @@ bindHeads arm originalScrut heads depth source =
 
                             else
                                 wrapLetBind headName
-                                    (ExprAccess
-                                        { record = varLocal popped
-                                        , field = "first"
-                                        }
-                                    )
+                                    (access (varLocal popped) "first")
                                     bindRest
                     in
                     bindHead
@@ -928,26 +632,651 @@ bindHeads arm originalScrut heads depth source =
                         , varLocal source
                         ]
                 , cases =
-                    [ { pattern =
-                            PatNamed
-                                { ref = { moduleName = Nothing, name = "Just" }
-                                , arguments = [ PatVar popped ]
-                                }
+                    [ { pattern = justPat (PatVar popped)
                       , body = afterPop
                       }
-                    , { pattern =
-                            PatNamed
-                                { ref = { moduleName = Nothing, name = "Nothing" }
-                                , arguments = []
-                                }
-                      , body =
-                            ExprApplication
-                                [ ExprVar { moduleName = Just "Debug", name = "todo" }
-                                , ExprString "elm-to-gren: list length mismatch"
-                                ]
+                    , { pattern = nothingPat
+                      , body = todoExpr "elm-to-gren: list length mismatch"
                       }
                     ]
                 }
+
+
+-- 2. ARRAY POP (depth-1 merged) ----------------------------------------------
+--
+-- Multiple non-empty arms (`Nothing :: r`, `Just x :: _`) must share one outer
+-- `Just popped` and discriminate on `popped.first`. Separate Just arms are
+-- redundant in Gren.
+
+
+tryArrayPopCase : { expression : Expr, cases : Array CaseArm } -> Maybe Expr
+tryArrayPopCase caseBlock =
+    if not (isDepthOneArrayCase caseBlock.cases) then
+        Nothing
+
+    else
+        Just (renderMergedDepthOne caseBlock.expression caseBlock.cases)
+
+
+isDepthOneArrayCase : Array CaseArm -> Bool
+isDepthOneArrayCase arms =
+    Array.any (\arm -> isListShapeMatch arm.pattern) arms
+        && Array.all (\arm -> isDepthOneArrayArm arm.pattern) arms
+
+
+isDepthOneArrayArm : Pattern -> Bool
+isDepthOneArrayArm pattern =
+    when pattern is
+        PatAll ->
+            True
+
+        PatVar _ ->
+            True
+
+        PatList members ->
+            Array.length members
+                <= 1
+                && not (Array.any patternHasCons members)
+
+        PatCons { head = head, tail = tail } ->
+            not (isConsPattern tail)
+                && canRewriteHead head
+                && isSimpleRest tail
+
+        PatAs { pattern = inner } ->
+            when parseConsChain inner is
+                Just chain ->
+                    Array.length chain.heads
+                        == 1
+                        && Array.all canRewriteHead chain.heads
+                        && isSimpleRest chain.rest
+
+                Nothing ->
+                    isDepthOneArrayArm inner
+
+        _ ->
+            False
+
+
+canRewriteHead : Pattern -> Bool
+canRewriteHead pattern =
+    when pattern is
+        PatVar _ ->
+            True
+
+        PatAll ->
+            True
+
+        PatNamed { arguments = args } ->
+            Array.all isSimpleListHead args
+
+        PatAs { pattern = inner } ->
+            canRewriteHead inner
+
+        _ ->
+            not (patternHasCons pattern)
+
+
+isConsPattern : Pattern -> Bool
+isConsPattern pattern =
+    when pattern is
+        PatCons _ ->
+            True
+
+        PatAs { pattern = inner } ->
+            isConsPattern inner
+
+        _ ->
+            False
+
+
+renderMergedDepthOne : Expr -> Array CaseArm -> Expr
+renderMergedDepthOne scrutinee arms =
+    let
+        scrutName =
+            "list_scrut_elmToGren"
+
+        popped =
+            "list_pop_elmToGren"
+
+        emptyArms =
+            arms
+                |> Array.mapAndKeepJust
+                    (\arm ->
+                        when arm.pattern is
+                            PatList members ->
+                                if Array.isEmpty members then
+                                    Just
+                                        { pattern = nothingPat
+                                        , body = arm.body
+                                        }
+
+                                else
+                                    Nothing
+
+                            _ ->
+                                Nothing
+                    )
+
+        nothingArms =
+            if Array.isEmpty emptyArms then
+                [ { pattern = nothingPat
+                  , body = todoExpr "elm-to-gren: empty list arm missing"
+                  }
+                ]
+
+            else
+                emptyArms
+
+        headArms =
+            arms
+                |> Array.mapAndKeepJust (depthOneHeadArm popped)
+
+        catchAllArms =
+            arms
+                |> Array.mapAndKeepJust
+                    (\arm ->
+                        when arm.pattern is
+                            PatAll ->
+                                Just arm
+
+                            PatVar _ ->
+                                Just arm
+
+                            _ ->
+                                Nothing
+                    )
+
+        justBody =
+            ExprCase
+                { expression = access (varLocal popped) "first"
+                , cases = Array.flatten [ headArms, catchAllArms ]
+                }
+
+        justArm =
+            { pattern = justPat (PatVar popped)
+            , body = justBody
+            }
+    in
+    ExprLet
+        { declarations =
+            [ LetFunction
+                { name = scrutName
+                , arguments = []
+                , expression = scrutinee
+                }
+            ]
+        , expression =
+            ExprCase
+                { expression = popFirstOf (varLocal scrutName)
+                , cases = Array.flatten [ nothingArms, [ justArm ] ]
+                }
+        }
+
+
+depthOneHeadArm : String -> CaseArm -> Maybe CaseArm
+depthOneHeadArm popped arm =
+    when peelDepthOne arm.pattern is
+        Nothing ->
+            Nothing
+
+        Just { head = head, tail = tail } ->
+            -- Pattern is matched against `popped.first`; rest comes from `popped.rest`.
+            Just
+                { pattern = head
+                , body =
+                    finishRest (access (varLocal popped) "rest") tail arm.body
+                }
+
+
+type alias DepthOne =
+    { head : Pattern
+    , tail : Pattern
+    }
+
+
+peelDepthOne : Pattern -> Maybe DepthOne
+peelDepthOne pattern =
+    when pattern is
+        PatCons { head = head, tail = tail } ->
+            if isConsPattern tail then
+                Nothing
+
+            else
+                Just { head = head, tail = tail }
+
+        PatList members ->
+            when Array.popFirst members is
+                Just { first = head, rest = more } ->
+                    if Array.isEmpty more then
+                        Just { head = head, tail = PatList [] }
+
+                    else
+                        Nothing
+
+                Nothing ->
+                    Nothing
+
+        PatAs { pattern = inner } ->
+            peelDepthOne inner
+
+        _ ->
+            Nothing
+
+
+finishRest : Expr -> Pattern -> Expr -> Expr
+finishRest restExpr restPat body =
+    when restPat is
+        PatVar name ->
+            wrapLetBind name restExpr body
+
+        PatAll ->
+            body
+
+        PatList members ->
+            if Array.isEmpty members then
+                body
+
+            else
+                body
+
+        PatAs { pattern = inner } ->
+            when simpleRestName restPat is
+                Just name ->
+                    wrapLetBind name restExpr body
+
+                Nothing ->
+                    finishRest restExpr inner body
+
+        _ ->
+            body
+
+
+renderWrappedPop : Expr -> Array CaseArm -> (Expr -> Expr) -> Expr
+renderWrappedPop scrutinee arms wrapScrut =
+    let
+        scrutName =
+            "list_scrut_elmToGren"
+    in
+    ExprLet
+        { declarations =
+            [ LetFunction
+                { name = scrutName
+                , arguments = []
+                , expression = scrutinee
+                }
+            ]
+        , expression =
+            ExprCase
+                { expression = wrapScrut (varLocal scrutName)
+                , cases = arms
+                }
+        }
+
+
+popFirstOf : Expr -> Expr
+popFirstOf scrut =
+    ExprApplication
+        [ ExprVar { moduleName = Just "Array", name = "popFirst" }
+        , scrut
+        ]
+
+
+{-| Rewrite a list pattern as if the scrutinee were already `Array.popFirst`d.
+Used by Maybe/Result map wrappers. Depth-1 only.
+-}
+rewriteArmUnderPop : Int -> CaseArm -> Maybe CaseArm
+rewriteArmUnderPop _ arm =
+    when arm.pattern is
+        PatAll ->
+            Just arm
+
+        PatVar _ ->
+            Just arm
+
+        PatList members ->
+            if Array.isEmpty members then
+                Just { pattern = nothingPat, body = arm.body }
+
+            else
+                depthOneToJustArm arm
+
+        PatCons _ ->
+            depthOneToJustArm arm
+
+        PatAs { pattern = inner } ->
+            rewriteArmUnderPop 0 { pattern = inner, body = arm.body }
+
+        _ ->
+            Nothing
+
+
+depthOneToJustArm : CaseArm -> Maybe CaseArm
+depthOneToJustArm arm =
+    when peelDepthOne arm.pattern is
+        Nothing ->
+            Nothing
+
+        Just { head = head, tail = tail } ->
+            let
+                popped =
+                    "list_pop_elmToGren"
+
+                restBody =
+                    finishRest (access (varLocal popped) "rest") tail arm.body
+            in
+            Just
+                { pattern = justPat (PatVar popped)
+                , body =
+                    when head is
+                        PatVar name ->
+                            wrapLetBind name
+                                (access (varLocal popped) "first")
+                                restBody
+
+                        PatAll ->
+                            restBody
+
+                        _ ->
+                            ExprCase
+                                { expression = access (varLocal popped) "first"
+                                , cases =
+                                    [ { pattern = head, body = restBody } ]
+                                }
+                }
+
+
+-- 3. MAYBE UNCONS ------------------------------------------------------------
+
+
+tryMaybeUnconsCase : { expression : Expr, cases : Array CaseArm } -> Maybe Expr
+tryMaybeUnconsCase caseBlock =
+    if not (isMaybeUnconsCase caseBlock.cases) then
+        Nothing
+
+    else
+        let
+            rewritten =
+                Array.mapAndKeepJust rewriteMaybeArm caseBlock.cases
+        in
+        if Array.length rewritten /= Array.length caseBlock.cases then
+            Nothing
+
+        else
+            Just
+                (renderWrappedPop caseBlock.expression
+                    rewritten
+                    (\scrut ->
+                        ExprApplication
+                            [ ExprVar { moduleName = Just "Maybe", name = "map" }
+                            , ExprVar { moduleName = Just "Array", name = "popFirst" }
+                            , scrut
+                            ]
+                    )
+                )
+
+
+isMaybeUnconsCase : Array CaseArm -> Bool
+isMaybeUnconsCase arms =
+    Array.any armHasMaybeInnerUncons arms
+        && Array.all isMaybeUnconsArm arms
+
+
+isMaybeUnconsArm : CaseArm -> Bool
+isMaybeUnconsArm arm =
+    when arm.pattern is
+        PatAll ->
+            True
+
+        PatNamed { ref = ref, arguments = args } ->
+            if isMaybeName ref "Nothing" && Array.isEmpty args then
+                True
+
+            else if isMaybeName ref "Just" && Array.length args == 1 then
+                when Array.first args is
+                    Just inner ->
+                        listInnerPatternOk inner
+
+                    Nothing ->
+                        False
+
+            else
+                False
+
+        _ ->
+            False
+
+
+armHasMaybeInnerUncons : CaseArm -> Bool
+armHasMaybeInnerUncons arm =
+    when arm.pattern is
+        PatNamed { ref = ref, arguments = args } ->
+            isMaybeName ref "Just"
+                && (when Array.first args is
+                        Just inner ->
+                            patternHasCons inner
+
+                        Nothing ->
+                            False
+                   )
+
+        _ ->
+            False
+
+
+isMaybeName : NamedRef -> String -> Bool
+isMaybeName ref expected =
+    ref.name
+        == expected
+        && (ref.moduleName == Nothing || ref.moduleName == Just "Maybe")
+
+
+listInnerPatternOk : Pattern -> Bool
+listInnerPatternOk pattern =
+    when pattern is
+        PatList members ->
+            Array.length members
+                <= 1
+                && not (Array.any patternHasCons members)
+
+        PatCons _ ->
+            isDepthOneArrayArm pattern
+
+        PatAll ->
+            True
+
+        PatVar _ ->
+            True
+
+        _ ->
+            not (patternHasCons pattern)
+
+
+rewriteMaybeArm : CaseArm -> Maybe CaseArm
+rewriteMaybeArm arm =
+    when arm.pattern is
+        PatAll ->
+            Just arm
+
+        PatNamed { ref = ref, arguments = args } ->
+            if isMaybeName ref "Nothing" then
+                Just arm
+
+            else if isMaybeName ref "Just" then
+                when Array.first args is
+                    Just inner ->
+                        rewriteArmUnderPop 0 { pattern = inner, body = arm.body }
+                            |> Maybe.map
+                                (\innerArm ->
+                                    { pattern =
+                                        PatNamed
+                                            { ref = ref
+                                            , arguments = [ innerArm.pattern ]
+                                            }
+                                    , body = innerArm.body
+                                    }
+                                )
+
+                    Nothing ->
+                        Nothing
+
+            else
+                Nothing
+
+        _ ->
+            Nothing
+
+
+-- 4. RESULT UNCONS -----------------------------------------------------------
+
+
+tryResultUnconsCase : { expression : Expr, cases : Array CaseArm } -> Maybe Expr
+tryResultUnconsCase caseBlock =
+    if not (isResultUnconsCase caseBlock.cases) then
+        Nothing
+
+    else
+        let
+            rewritten =
+                Array.mapAndKeepJust rewriteResultArm caseBlock.cases
+        in
+        if Array.length rewritten /= Array.length caseBlock.cases then
+            Nothing
+
+        else
+            Just
+                (renderWrappedPop caseBlock.expression
+                    rewritten
+                    (\scrut ->
+                        ExprApplication
+                            [ ExprVar { moduleName = Just "Result", name = "map" }
+                            , ExprVar { moduleName = Just "Array", name = "popFirst" }
+                            , scrut
+                            ]
+                    )
+                )
+
+
+isResultUnconsCase : Array CaseArm -> Bool
+isResultUnconsCase arms =
+    Array.any armHasResultInnerUncons arms
+        && Array.all isResultUnconsArm arms
+
+
+isResultUnconsArm : CaseArm -> Bool
+isResultUnconsArm arm =
+    when arm.pattern is
+        PatAll ->
+            True
+
+        PatNamed { ref = ref, arguments = args } ->
+            if isResultName ref "Err" && Array.length args == 1 then
+                when Array.first args is
+                    Just inner ->
+                        not (patternHasCons inner)
+
+                    Nothing ->
+                        False
+
+            else if isResultName ref "Ok" && Array.length args == 1 then
+                when Array.first args is
+                    Just inner ->
+                        listInnerPatternOk inner
+
+                    Nothing ->
+                        False
+
+            else
+                False
+
+        _ ->
+            False
+
+
+armHasResultInnerUncons : CaseArm -> Bool
+armHasResultInnerUncons arm =
+    when arm.pattern is
+        PatNamed { ref = ref, arguments = args } ->
+            isResultName ref "Ok"
+                && (when Array.first args is
+                        Just inner ->
+                            patternHasCons inner
+
+                        Nothing ->
+                            False
+                   )
+
+        _ ->
+            False
+
+
+isResultName : NamedRef -> String -> Bool
+isResultName ref expected =
+    ref.name
+        == expected
+        && (ref.moduleName == Nothing || ref.moduleName == Just "Result")
+
+
+rewriteResultArm : CaseArm -> Maybe CaseArm
+rewriteResultArm arm =
+    when arm.pattern is
+        PatAll ->
+            Just arm
+
+        PatNamed { ref = ref, arguments = args } ->
+            if isResultName ref "Err" then
+                Just arm
+
+            else if isResultName ref "Ok" then
+                when Array.first args is
+                    Just inner ->
+                        rewriteArmUnderPop 0 { pattern = inner, body = arm.body }
+                            |> Maybe.map
+                                (\innerArm ->
+                                    { pattern =
+                                        PatNamed
+                                            { ref = ref
+                                            , arguments = [ innerArm.pattern ]
+                                            }
+                                    , body = innerArm.body
+                                    }
+                                )
+
+                    Nothing ->
+                        Nothing
+
+            else
+                Nothing
+
+        _ ->
+            Nothing
+
+
+-- HELPERS --------------------------------------------------------------------
+
+
+justPat : Pattern -> Pattern
+justPat inner =
+    PatNamed
+        { ref = { moduleName = Nothing, name = "Just" }
+        , arguments = [ inner ]
+        }
+
+
+nothingPat : Pattern
+nothingPat =
+    PatNamed
+        { ref = { moduleName = Nothing, name = "Nothing" }
+        , arguments = []
+        }
+
+
+todoExpr : String -> Expr
+todoExpr message =
+    ExprApplication
+        [ ExprVar { moduleName = Just "Debug", name = "todo" }
+        , ExprString message
+        ]
 
 
 wrapLetBind : String -> Expr -> Expr -> Expr
@@ -967,6 +1296,11 @@ wrapLetBind name value body =
 varLocal : String -> Expr
 varLocal name =
     ExprVar { moduleName = Nothing, name = name }
+
+
+access : Expr -> String -> Expr
+access record field =
+    ExprAccess { record = record, field = field }
 
 
 -- UNPORTED SCAN --------------------------------------------------------------
@@ -1054,7 +1388,6 @@ patternHasCons pattern =
             Array.any patternHasCons items
 
         PatList items ->
-            -- Fixed list patterns print fine; only cons is unported.
             Array.any patternHasCons items
 
         PatNamed { arguments = args } ->

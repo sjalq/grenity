@@ -407,8 +407,26 @@ printPattern prec pattern =
                     if Array.isEmpty args then
                         head
 
+                    else if Array.length args == 1 then
+                        when Array.first args is
+                            Just arg ->
+                                head ++ " " ++ printPattern 1 arg
+
+                            Nothing ->
+                                head
+
                     else
-                        head ++ " " ++ String.join " " (Array.map (printPattern 1) args)
+                        -- Gren multi-arg constructors take one record payload.
+                        head
+                            ++ " { "
+                            ++ String.join ", "
+                                (Array.indexedMap
+                                    (\index arg ->
+                                        fieldLabel index ++ " = " ++ printPattern 0 arg
+                                    )
+                                    args
+                                )
+                            ++ " }"
             in
             if prec > 0 && not (Array.isEmpty args) then
                 "(" ++ rendered ++ ")"

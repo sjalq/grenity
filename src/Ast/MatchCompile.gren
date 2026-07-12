@@ -65,13 +65,39 @@ compileDeclaration : Declaration -> Declaration
 compileDeclaration declaration =
     when declaration is
         DeclFunction fn ->
-            DeclFunction { fn | expression = compileExpr fn.expression }
+            let
+                compiledBody =
+                    compileExpr fn.expression
+
+                withArgs =
+                    rewriteConsArgs fn.arguments compiledBody
+            in
+            DeclFunction
+                { fn
+                    | arguments = withArgs.arguments
+                    , expression = withArgs.expression
+                }
 
         DeclDestructure { pattern = pattern, expression = expression } ->
-            DeclDestructure
-                { pattern = pattern
-                , expression = compileExpr expression
-                }
+            let
+                compiled =
+                    compileExpr expression
+
+                rewritten =
+                    rewriteConsArgs [ pattern ] compiled
+            in
+            when Array.first rewritten.arguments is
+                Just newPattern ->
+                    DeclDestructure
+                        { pattern = newPattern
+                        , expression = rewritten.expression
+                        }
+
+                Nothing ->
+                    DeclDestructure
+                        { pattern = pattern
+                        , expression = compiled
+                        }
 
         _ ->
             declaration
@@ -131,9 +157,16 @@ compileExpr expr =
                     ExprCase compiled
 
         ExprLambda { arguments = arguments, expression = body } ->
+            let
+                compiledBody =
+                    compileExpr body
+
+                withArgs =
+                    rewriteConsArgs arguments compiledBody
+            in
             ExprLambda
-                { arguments = arguments
-                , expression = compileExpr body
+                { arguments = withArgs.arguments
+                , expression = withArgs.expression
                 }
 
         ExprRecord fields ->
@@ -208,7 +241,12 @@ tryCompileListCase caseBlock =
                                     Just rewritten
 
                                 Nothing ->
-                                    tryCtorEmbeddedCase caseBlock
+                                    when tryCtorEmbeddedCase caseBlock is
+                                        Just rewritten ->
+                                            Just rewritten
+
+                                        Nothing ->
+                                            tryTupleListCase caseBlock
 
 
 -- 1. PURE LIST (length dispatch) ---------------------------------------------
@@ -1367,15 +1405,11 @@ armHasCtorEmbeddedUncons arm =
     when arm.pattern is
         PatNamed { ref = ref, arguments = args } ->
             not (isReservedMapCtor ref.name)
-                && Array.length args
-                == 1
-                && (when Array.first args is
-                        Just inner ->
-                            patternHasCons inner || isEmptyListPattern inner
-
-                        Nothing ->
-                            False
-                   )
+                && Array.any
+                    (\inner ->
+                        patternHasCons inner || isEmptyListPattern inner
+                    )
+                    args
 
         _ ->
             False
@@ -1404,17 +1438,8 @@ isCtorEmbeddedArmOk arm =
             else if Array.isEmpty args then
                 True
 
-            else if Array.length args == 1 then
-                when Array.first args is
-                    Just inner ->
-                        ctorArgOk inner
-
-                    Nothing ->
-                        False
-
             else
-                -- Multi-arg ctors need Gren record patterns; edit path for now.
-                False
+                Array.all ctorArgOk args
 
         _ ->
             False
@@ -1510,67 +1535,116 @@ rewriteCtorEmbeddedArm allArms arm =
                 Just arm
 
             else
-                when Array.first args is
-                    Just inner ->
-                        when peelDepthOne inner is
-                            Just { head = head, tail = tail } ->
-                                let
-                                    listName =
-                                        "ctor_list_elmToGren"
+                let
+                    emptyFallback =
+                        ctorEmptyFallback ref.name allArms
 
-                                    emptyFallback =
-                                        ctorEmptyFallback ref.name allArms
+                    prepared =
+                        Array.indexedMap prepareCtorArg args
 
-                                    peeledBody =
-                                        peelListBinding listName head tail arm.body emptyFallback
-                                in
-                                Just
-                                    { pattern =
-                                        PatNamed
-                                            { ref = ref
-                                            , arguments = [ PatVar listName ]
-                                            }
-                                    , body = peeledBody
-                                    }
+                    newArgs =
+                        Array.map .pattern prepared
 
-                            Nothing ->
-                                if isEmptyListPattern inner then
-                                    let
-                                        listName =
-                                            "ctor_list_elmToGren"
-                                    in
-                                    Just
-                                        { pattern =
-                                            PatNamed
-                                                { ref = ref
-                                                , arguments = [ PatVar listName ]
-                                                }
-                                        , body =
+                    peeledBody =
+                        Array.foldl
+                            (\item body ->
+                                when item.listName is
+                                    Nothing ->
+                                        body
+
+                                    Just listName ->
+                                        if item.exactEmpty then
                                             ExprCase
                                                 { expression = popFirstOf (varLocal listName)
                                                 , cases =
-                                                    [ { pattern = nothingPat
-                                                      , body = arm.body
-                                                      }
+                                                    [ { pattern = nothingPat, body = body }
                                                     , { pattern = PatAll
                                                       , body =
                                                             todoExpr "elm-to-gren: expected empty list"
                                                       }
                                                     ]
                                                 }
-                                        }
 
-                                else if isSimpleListHead inner || not (patternHasCons inner) then
-                                    Just arm
+                                        else
+                                            peelListHeads listName
+                                                item.heads
+                                                item.rest
+                                                body
+                                                emptyFallback
+                            )
+                            arm.body
+                            prepared
+                in
+                if Array.any (\item -> item.failed) prepared then
+                    Nothing
 
-                                else
-                                    Nothing
-
-                    Nothing ->
-                        Nothing
+                else
+                    Just
+                        { pattern =
+                            PatNamed
+                                { ref = ref
+                                , arguments = newArgs
+                                }
+                        , body = peeledBody
+                        }
 
         _ ->
             Nothing
+
+
+type alias PreparedCtorArg =
+    { pattern : Pattern
+    , listName : Maybe String
+    , heads : Array Pattern
+    , rest : Pattern
+    , exactEmpty : Bool
+    , failed : Bool
+    }
+
+
+prepareCtorArg : Int -> Pattern -> PreparedCtorArg
+prepareCtorArg index arg =
+    let
+        listName =
+            "ctor_list_" ++ String.fromInt index ++ "_elmToGren"
+    in
+    when listShapeToHeadsRest arg is
+        Just { heads = heads, rest = rest } ->
+            { pattern = PatVar listName
+            , listName = Just listName
+            , heads = heads
+            , rest = rest
+            , exactEmpty = False
+            , failed = False
+            }
+
+        Nothing ->
+            if isEmptyListPattern arg then
+                { pattern = PatVar listName
+                , listName = Just listName
+                , heads = []
+                , rest = PatList []
+                , exactEmpty = True
+                , failed = False
+                }
+
+            else if patternHasCons arg then
+                { pattern = arg
+                , listName = Nothing
+                , heads = []
+                , rest = PatAll
+                , exactEmpty = False
+                , failed = True
+                }
+
+            else
+                { pattern = arg
+                , listName = Nothing
+                , heads = []
+                , rest = PatAll
+                , exactEmpty = False
+                , failed = False
+                }
 
 
 ctorEmptyFallback : String -> Array CaseArm -> Expr
@@ -1605,41 +1679,236 @@ ctorEmptyFallback ctorName allArms =
         |> Maybe.withDefault (todoExpr "elm-to-gren: embedded uncons did not match")
 
 
-peelListBinding : String -> Pattern -> Pattern -> Expr -> Expr -> Expr
-peelListBinding listName head tail body emptyFallback =
+peelListHeads : String -> Array Pattern -> Pattern -> Expr -> Expr -> Expr
+peelListHeads listName heads rest body emptyFallback =
     let
         popped =
             "ctor_pop_elmToGren"
+    in
+    if Array.isEmpty heads then
+        finishRest (varLocal listName) rest body
 
-        restBody =
-            finishRest (access (varLocal popped) "rest") tail body
+    else
+        ExprCase
+            { expression = popFirstOf (varLocal listName)
+            , cases =
+                [ { pattern = justPat (PatVar popped)
+                  , body = peelPatternHeads 0 popped heads rest body
+                  }
+                , { pattern = nothingPat
+                  , body = emptyFallback
+                  }
+                ]
+            }
 
-        headBody =
-            when head is
-                PatVar name ->
-                    wrapLetBind name (access (varLocal popped) "first") restBody
 
-                PatAll ->
-                    restBody
+-- 6. TUPLE-LIST CASES (Phase 4+) ---------------------------------------------
+
+
+tryTupleListCase : { expression : Expr, cases : Array CaseArm } -> Maybe Expr
+tryTupleListCase caseBlock =
+    when caseBlock.expression is
+        ExprTuple components ->
+            let
+                arity =
+                    Array.length components
+            in
+            if not (isTupleListCase arity caseBlock.cases) then
+                Nothing
+
+            else
+                let
+                    listColumns =
+                        Array.initialize arity 0 (\i -> tupleColumnIsList i caseBlock.cases)
+
+                    wrapped =
+                        Array.indexedMap
+                            (\i comp ->
+                                if Array.get i listColumns == Just True then
+                                    popFirstOf comp
+
+                                else
+                                    comp
+                            )
+                            components
+
+                    rewritten =
+                        Array.mapAndKeepJust (rewriteTupleListArm listColumns) caseBlock.cases
+                in
+                if Array.length rewritten /= Array.length caseBlock.cases then
+                    Nothing
+
+                else
+                    Just
+                        (ExprCase
+                            { expression = ExprTuple wrapped
+                            , cases = rewritten
+                            }
+                        )
+
+        _ ->
+            Nothing
+
+
+isTupleListCase : Int -> Array CaseArm -> Bool
+isTupleListCase arity arms =
+    Array.any (tupleArmHasListUncons arity) arms
+        && Array.all (tupleArmOk arity) arms
+
+
+tupleArmOk : Int -> CaseArm -> Bool
+tupleArmOk arity arm =
+    when arm.pattern is
+        PatAll ->
+            True
+
+        PatTuple items ->
+            Array.length items
+                == arity
+                && Array.all
+                    (\p ->
+                        listInnerPatternOk p
+                            || not (patternHasCons p)
+                    )
+                    items
+
+        _ ->
+            False
+
+
+tupleArmHasListUncons : Int -> CaseArm -> Bool
+tupleArmHasListUncons _ arm =
+    when arm.pattern is
+        PatTuple items ->
+            Array.any patternHasCons items
+
+        _ ->
+            False
+
+
+tupleColumnIsList : Int -> Array CaseArm -> Bool
+tupleColumnIsList index arms =
+    Array.any
+        (\arm ->
+            when arm.pattern is
+                PatTuple items ->
+                    when Array.get index items is
+                        Just p ->
+                            isListShapeMatch p || patternHasCons p
+
+                        Nothing ->
+                            False
 
                 _ ->
-                    ExprCase
-                        { expression = access (varLocal popped) "first"
-                        , cases =
-                            [ { pattern = head, body = restBody } ]
+                    False
+        )
+        arms
+
+
+rewriteTupleListArm : Array Bool -> CaseArm -> Maybe CaseArm
+rewriteTupleListArm listColumns arm =
+    when arm.pattern is
+        PatAll ->
+            Just arm
+
+        PatTuple items ->
+            let
+                patterns =
+                    Array.indexedMap
+                        (\i p ->
+                            when Array.get i listColumns is
+                                Just True ->
+                                    rewriteArmUnderPop i { pattern = p, body = ExprUnit }
+                                        |> Maybe.map .pattern
+
+                                _ ->
+                                    Just p
+                        )
+                        items
+                        |> Array.mapAndKeepJust (\m -> m)
+            in
+            if Array.length patterns /= Array.length items then
+                Nothing
+
+            else
+                Just { pattern = PatTuple patterns, body = arm.body }
+
+        _ ->
+            Nothing
+
+
+-- 7. CONS IN FUNCTION / LAMBDA / LET ARGS ------------------------------------
+
+
+rewriteConsArgs :
+    Array Pattern
+    -> Expr
+    -> { arguments : Array Pattern, expression : Expr }
+rewriteConsArgs arguments body =
+    let
+        state =
+            Array.indexedFoldl
+                (\index arg current ->
+                    if patternHasCons arg || isEmptyListPattern arg then
+                        when listShapeToHeadsRest arg is
+                            Just { heads = heads, rest = rest } ->
+                                let
+                                    listName =
+                                        "arg_list_" ++ String.fromInt index ++ "_elmToGren"
+
+                                    peeled =
+                                        peelListHeads listName
+                                            heads
+                                            rest
+                                            current.expression
+                                            (todoExpr "elm-to-gren: function arg list did not match")
+                                in
+                                { arguments =
+                                    Array.pushLast (PatVar listName) current.arguments
+                                , expression = peeled
+                                }
+
+                            Nothing ->
+                                if isEmptyListPattern arg then
+                                    let
+                                        listName =
+                                            "arg_list_" ++ String.fromInt index ++ "_elmToGren"
+
+                                        peeled =
+                                            ExprCase
+                                                { expression = popFirstOf (varLocal listName)
+                                                , cases =
+                                                    [ { pattern = nothingPat
+                                                      , body = current.expression
+                                                      }
+                                                    , { pattern = PatAll
+                                                      , body =
+                                                            todoExpr "elm-to-gren: expected empty list arg"
+                                                      }
+                                                    ]
+                                                }
+                                    in
+                                    { arguments =
+                                        Array.pushLast (PatVar listName) current.arguments
+                                    , expression = peeled
+                                    }
+
+                                else
+                                    { arguments =
+                                        Array.pushLast arg current.arguments
+                                    , expression = current.expression
+                                    }
+
+                    else
+                        { arguments =
+                            Array.pushLast arg current.arguments
+                        , expression = current.expression
                         }
+                )
+                { arguments = [], expression = body }
+                arguments
     in
-    ExprCase
-        { expression = popFirstOf (varLocal listName)
-        , cases =
-            [ { pattern = justPat (PatVar popped)
-              , body = headBody
-              }
-            , { pattern = nothingPat
-              , body = emptyFallback
-              }
-            ]
-        }
+    state
 
 
 -- HELPERS --------------------------------------------------------------------

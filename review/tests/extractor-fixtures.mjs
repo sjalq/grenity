@@ -213,95 +213,26 @@ assert.match(
 );
 assert.match(useOutput, /qualifiedAlias = \(\\arg1_elmToGren arg2_elmToGren/u);
 assert.match(useOutput, /empty = \{\}/u);
-// Tuple-pattern list cases still use outer popFirst.
-assert.match(useOutput, /when Array\.popFirst \(values\) of/u);
-// Pure list-shape cases compile via Array.length dispatch.
-assert.match(useOutput, /list_scrut_elmToGren/u);
-assert.match(useOutput, /Array\.length list_scrut_elmToGren is/u);
+// List/cons *case* totalization lives on the host (Ast.MatchCompile). The
+// rule only renames case→when and still rewrites expression-side (::).
+assert.match(useOutput, /when values of/u);
 assert.match(useOutput, /Array\.pushFirst/u);
-assert.match(
-  useOutput,
-  /Nothing -> Nothing Just \{ first = \{ first = first, second = second \}, rest = rest \}/u,
-);
 assert.match(
   useOutput,
   /Pairish \{ first = \{ first = first, second = second \} , second = \{ first = third, second = fourth \} \}/u,
 );
 const useRawOutput = transformedFixtureModule("structural", use);
-// Nested / triple / exact multi-cons pure lists bind heads after length match.
-assert.match(useRawOutput, /nestedConsPattern[\s\S]*?Array\.length list_scrut_elmToGren is/u);
-assert.match(useRawOutput, /nestedConsPattern[\s\S]*?list_scrut_elmToGren/u);
-assert.match(useRawOutput, /tripleConsPattern[\s\S]*?\bthird\b/u);
-assert.match(useRawOutput, /exactDoubleCons[\s\S]*?Array\.length list_scrut_elmToGren is/u);
-// Scrutinee cons is rewritten inside the length-dispatch let-binding.
+// Expression cons in scrutinees still rewrites under the edit path.
 assert.match(useRawOutput, /consScrutinee[\s\S]*?Array\.pushFirst/u);
-assert.match(useOutput, /Result\.map Array\.popFirst/u);
-assert.match(useOutput, /when Array\.popFirst rest_r\d+_c\d+_elmToGren_list is/u);
-// Embedded ctor empty-list sibling supplies the Nothing fallback body.
-assert.match(
-  useOutput,
-  /when Array\.popFirst rest_r\d+_c\d+_elmToGren_list is\s+Just \{ first = first, rest = rest \} ->\s+first \+ List\.length rest\s+Nothing ->\s+0/u,
-);
-// Embedded exact `Ctor (x :: [])` needs an empty-rest guard.
-assert.match(
-  useRawOutput,
-  /when Array\.popFirst rest_r\d+_c\d+_elmToGren_list is\n( +)Just \{ first = first, rest = rest_r\d+_c\d+_elmToGren_list_e \} ->\n\1 {4}when rest_r\d+_c\d+_elmToGren_list_e is\n\1 {8}\[\] ->\n\1 {12}first\n\1 {8}_ ->\n\1 {12}-1\n\1Nothing ->\n\1 {4}0/u,
-);
-// Pure list-shape cases (including former "unsafe" open/exact mixes and named
-// catch-alls) compile via length dispatch. Remaining :: diagnostics are
-// non-pure shapes (ctor-embedded refuse paths, etc.).
-assert.ok(
-  use.diagnostics.filter((d) => /cannot stay as \(::\)/u.test(d.message)).length
-    >= 2,
-);
-assert.match(
-  useRawOutput,
-  /unsafeExactThenOpenRest[\s\S]*?Array\.length/u,
-);
-// Ctor-embedded open+exact still refuses (not a pure list scrutinee).
-assert.match(
-  useRawOutput,
-  /unsafeEmbeddedExactThenOpen[\s\S]*?Box \(first :: \[\]\)[\s\S]*?Box \(first :: rest\)/u,
-);
-assert.match(
-  useRawOutput,
-  /unsafeExactThenVarCatchAll[\s\S]*?let\s+other\s*=/u,
-);
-assert.match(
-  useRawOutput,
-  /unsafeMultiConsVarCatchAll[\s\S]*?Array\.length/u,
-);
-assert.match(
-  useRawOutput,
-  /unsafeMultiConsOtherThenAll[\s\S]*?Array\.length/u,
-);
-assert.match(
-  useRawOutput,
-  /unsafeEmbeddedVarCatchAll[\s\S]*?Box \(first :: \[\]\)[\s\S]*?other/u,
-);
-// Tuple/Maybe multi-cons still use the classic popFirst path.
-assert.match(
-  useRawOutput,
-  /unsafeTupleMultiConsVar[\s\S]*?other/u,
-);
-assert.match(
-  useRawOutput,
-  /unsafeMaybeMultiConsVar[\s\S]*?Just other|unsafeMaybeMultiConsVar[\s\S]*?Array\.length/u,
-);
-// `_` before a later `Ctor []`: empty-list Nothing must paste `_` body (-1).
-assert.match(
-  useRawOutput,
-  /embeddedEmptyAfterAll[\s\S]*?when Array\.popFirst rest_r\d+_c\d+_elmToGren_list is\n( +)Just \{ first = first, rest = rest \} ->\n\1 {4}first \+ List\.length rest\n\1Nothing ->\n\1 {4}-1/u,
-);
-// Tuple multi-cons short peel pastes fully-wild `(_, _)` body (-1).
-assert.match(
-  useRawOutput,
-  /tupleMultiConsWild[\s\S]*?when Array\.popFirst rest_r\d+_c\d+_elmToGren is\n( +)Just \{ first = second, rest = rest \} ->\n\1 {4}first \+ second \+ List\.length rest \+ n\n\1Nothing ->\n\1 {4}-1/u,
-);
-// Maybe multi-cons short peel pastes `Just _` body (-1).
-assert.match(
-  useRawOutput,
-  /maybeMultiConsWild[\s\S]*?when Array\.popFirst rest_r\d+_c\d+_elmToGren is\n( +)Just \{ first = second, rest = rest \} ->\n\1 {4}first \+ second \+ List\.length rest\n\1Nothing ->\n\1 {4}-1/u,
+// Case arm (::) patterns are left for the host AST path (not string-edited).
+assert.match(useRawOutput, /nestedConsPattern[\s\S]*?first :: second :: rest/u);
+assert.match(useRawOutput, /embeddedCtorUncons[\s\S]*?Box \(first :: rest\)/u);
+assert.match(useRawOutput, /resultUncons[\s\S]*?Ok \(first :: rest\)/u);
+// Case-arm (::) no longer emits refuse diagnostics from the rule.
+assert.equal(
+  use.diagnostics.filter((d) => /cannot stay as \(::\)/u.test(d.message))
+    .length,
+  0,
 );
 
 // Port modules are allowed application targets; no hard refusal diagnostics.

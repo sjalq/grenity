@@ -28,12 +28,17 @@ import Ast.Types as Types exposing
     , TypeAnn(..)
     )
 import Char
+import Dict exposing (Dict)
 import Maybe exposing (Maybe(..))
 
 
 print : File -> String
 print file =
     let
+        -- Local type/value names: keep Module.Name when it would clash if shortened.
+        locals =
+            localDeclaredNames file.declarations
+
         -- Gren wants module docs *after* the module line (Elm often puts them
         -- before). Emit header first so the compiler never sees a doc block
         -- that looks like a free-floating comment before `module`.
@@ -51,7 +56,7 @@ print file =
 
         declarations =
             file.declarations
-                |> Array.map printDeclaration
+                |> Array.map (printDeclaration locals)
                 |> Array.keepIf (\block -> not (String.isEmpty block))
                 |> String.join "\n\n"
 
@@ -64,6 +69,70 @@ print file =
                 |> Array.keepIf (\part -> not (String.isEmpty part))
     in
     String.join "\n\n" bodyParts ++ "\n"
+
+
+{-| Names introduced by this module's declarations (types, aliases, values).
+-}
+localDeclaredNames : Array Declaration -> Dict String {}
+localDeclaredNames declarations =
+    Array.foldl
+        (\declaration acc ->
+            when declaration is
+                DeclFunction fn ->
+                    Dict.set fn.name {} acc
+
+                DeclAlias aliasDecl ->
+                    Dict.set aliasDecl.name {} acc
+
+                DeclCustomType custom ->
+                    let
+                        withType =
+                            Dict.set custom.name {} acc
+                    in
+                    Array.foldl
+                        (\ctor inner -> Dict.set ctor.name {} inner)
+                        withType
+                        custom.constructors
+
+                DeclPort signature ->
+                    Dict.set signature.name {} acc
+
+                DeclDestructure { pattern = pattern } ->
+                    Array.foldl (\n inner -> Dict.set n {} inner) acc (patternBoundNames pattern)
+
+                DeclInfix ->
+                    acc
+        )
+        Dict.empty
+        declarations
+
+
+patternBoundNames : Pattern -> Array String
+patternBoundNames pattern =
+    when pattern is
+        PatVar name ->
+            [ name ]
+
+        PatAs { pattern = inner, name = name } ->
+            Array.pushLast name (patternBoundNames inner)
+
+        PatTuple items ->
+            Array.foldl (\p acc -> Array.foldl Array.pushLast acc (patternBoundNames p)) [] items
+
+        PatList items ->
+            Array.foldl (\p acc -> Array.foldl Array.pushLast acc (patternBoundNames p)) [] items
+
+        PatCons { head = head, tail = tail } ->
+            Array.foldl Array.pushLast (patternBoundNames head) (patternBoundNames tail)
+
+        PatNamed { arguments = args } ->
+            Array.foldl (\p acc -> Array.foldl Array.pushLast acc (patternBoundNames p)) [] args
+
+        PatRecordBind fields ->
+            Array.foldl (\f acc -> Array.foldl Array.pushLast acc (patternBoundNames f.pattern)) [] fields
+
+        _ ->
+            []
 
 
 moduleDocumentation : Array String -> String
@@ -155,8 +224,8 @@ printExposedItem item =
                 name
 
 
-printDeclaration : Declaration -> String
-printDeclaration declaration =
+printDeclaration : Dict String {} -> Declaration -> String
+printDeclaration locals declaration =
     when declaration is
         DeclFunction fn ->
             let
@@ -171,7 +240,7 @@ printDeclaration declaration =
                 signature =
                     when fn.signature is
                         Just sig ->
-                            printSignature sig ++ "\n"
+                            printSignature locals sig ++ "\n"
 
                         Nothing ->
                             ""
@@ -181,10 +250,10 @@ printDeclaration declaration =
                         ""
 
                     else
-                        " " ++ String.join " " (Array.map (printPattern 1) fn.arguments)
+                        " " ++ String.join " " (Array.map (printPattern locals 1) fn.arguments)
 
                 body =
-                    printExpr 0 fn.expression
+                    printExpr locals 0 fn.expression
             in
             docs ++ signature ++ fn.name ++ args ++ " =\n    " ++ indentBlock 1 body
 
@@ -210,7 +279,7 @@ printDeclaration declaration =
                 ++ aliasDecl.name
                 ++ generics
                 ++ " =\n    "
-                ++ printType 0 aliasDecl.typeAnnotation
+                ++ printType locals 0 aliasDecl.typeAnnotation
 
         DeclCustomType custom ->
             let
@@ -231,7 +300,7 @@ printDeclaration declaration =
 
                 ctors =
                     custom.constructors
-                        |> Array.map printConstructor
+                        |> Array.map (printConstructor locals)
                         |> String.join "\n    | "
             in
             docs
@@ -242,24 +311,24 @@ printDeclaration declaration =
                 ++ ctors
 
         DeclPort signature ->
-            "port " ++ printSignature signature
+            "port " ++ printSignature locals signature
 
         DeclInfix ->
             ""
 
         DeclDestructure { pattern = pattern, expression = expression } ->
-            printPattern 1 pattern ++ " =\n    " ++ printExpr 0 expression
+            printPattern locals 1 pattern ++ " =\n    " ++ printExpr locals 0 expression
 
 
-printConstructor : { name : String, arguments : Array TypeAnn } -> String
-printConstructor ctor =
+printConstructor : Dict String {} -> { name : String, arguments : Array TypeAnn } -> String
+printConstructor locals ctor =
     if Array.isEmpty ctor.arguments then
         ctor.name
 
     else if Array.length ctor.arguments == 1 then
         when Array.first ctor.arguments is
             Just arg ->
-                ctor.name ++ " " ++ printType 1 arg
+                ctor.name ++ " " ++ printType locals 1 arg
 
             Nothing ->
                 ctor.name
@@ -271,20 +340,20 @@ printConstructor ctor =
             ++ String.join ", "
                 (Array.indexedMap
                     (\index arg ->
-                        fieldLabel index ++ " : " ++ printType 0 arg
+                        fieldLabel index ++ " : " ++ printType locals 0 arg
                     )
                     ctor.arguments
                 )
             ++ " }"
 
 
-printSignature : Signature -> String
-printSignature signature =
-    signature.name ++ " : " ++ printType 0 signature.typeAnnotation
+printSignature : Dict String {} -> Signature -> String
+printSignature locals signature =
+    signature.name ++ " : " ++ printType locals 0 signature.typeAnnotation
 
 
-printType : Int -> TypeAnn -> String
-printType prec typeAnn =
+printType : Dict String {} -> Int -> TypeAnn -> String
+printType locals prec typeAnn =
     when typeAnn is
         TypeGeneric name ->
             name
@@ -292,14 +361,14 @@ printType prec typeAnn =
         TypeTyped { ref = ref, arguments = args } ->
             let
                 head =
-                    printNamedRef True ref
+                    printNamedRef locals True ref
 
                 rendered =
                     if Array.isEmpty args then
                         head
 
                     else
-                        head ++ " " ++ String.join " " (Array.map (printType 1) args)
+                        head ++ " " ++ String.join " " (Array.map (printType locals 1) args)
             in
             if prec > 0 && not (Array.isEmpty args) then
                 "(" ++ rendered ++ ")"
@@ -311,7 +380,7 @@ printType prec typeAnn =
             "{}"
 
         TypeTuple items ->
-            printTupleType items
+            printTupleType locals items
 
         TypeRecord fields ->
             if Array.isEmpty fields then
@@ -322,7 +391,7 @@ printType prec typeAnn =
                     ++ String.join ", "
                         (Array.map
                             (\field ->
-                                field.name ++ " : " ++ printType 0 field.typeAnnotation
+                                field.name ++ " : " ++ printType locals 0 field.typeAnnotation
                             )
                             fields
                         )
@@ -335,7 +404,7 @@ printType prec typeAnn =
                 ++ String.join ", "
                     (Array.map
                         (\field ->
-                            field.name ++ " : " ++ printType 0 field.typeAnnotation
+                            field.name ++ " : " ++ printType locals 0 field.typeAnnotation
                         )
                         fields
                     )
@@ -344,7 +413,7 @@ printType prec typeAnn =
         TypeFunction { left = left, right = right } ->
             let
                 rendered =
-                    printType 1 left ++ " -> " ++ printType 0 right
+                    printType locals 1 left ++ " -> " ++ printType locals 0 right
             in
             if prec > 0 then
                 "(" ++ rendered ++ ")"
@@ -353,8 +422,8 @@ printType prec typeAnn =
                 rendered
 
 
-printTupleType : Array TypeAnn -> String
-printTupleType items =
+printTupleType : Dict String {} -> Array TypeAnn -> String
+printTupleType locals items =
     let
         labels =
             tupleFieldLabels (Array.length items)
@@ -367,7 +436,7 @@ printTupleType items =
             ++ String.join ", "
                 (Array.map2
                     (\label item ->
-                        label ++ " : " ++ printType 0 item
+                        label ++ " : " ++ printType locals 0 item
                     )
                     labels
                     items
@@ -375,8 +444,8 @@ printTupleType items =
             ++ " }"
 
 
-printPattern : Int -> Pattern -> String
-printPattern prec pattern =
+printPattern : Dict String {} -> Int -> Pattern -> String
+printPattern locals prec pattern =
     when pattern is
         PatAll ->
             "_"
@@ -400,7 +469,7 @@ printPattern prec pattern =
             String.fromFloat value
 
         PatTuple items ->
-            printTuplePattern items
+            printTuplePattern locals items
 
         PatRecord fields ->
             "{ " ++ String.join ", " fields ++ " }"
@@ -414,17 +483,17 @@ printPattern prec pattern =
                     ++ String.join ", "
                         (Array.map
                             (\field ->
-                                field.name ++ " = " ++ printPattern 0 field.pattern
+                                field.name ++ " = " ++ printPattern locals 0 field.pattern
                             )
                             fields
                         )
                     ++ " }"
 
         PatCons { head = head, tail = tail } ->
-            printConsPattern head tail
+            printConsPattern locals head tail
 
         PatList items ->
-            "[" ++ String.join ", " (Array.map (printPattern 0) items) ++ "]"
+            "[" ++ String.join ", " (Array.map (printPattern locals 0) items) ++ "]"
 
         PatVar name ->
             name
@@ -432,7 +501,7 @@ printPattern prec pattern =
         PatNamed { ref = ref, arguments = args } ->
             let
                 head =
-                    printNamedRef False ref
+                    printNamedRef locals False ref
 
                 rendered =
                     if Array.isEmpty args then
@@ -441,7 +510,7 @@ printPattern prec pattern =
                     else if Array.length args == 1 then
                         when Array.first args is
                             Just arg ->
-                                head ++ " " ++ printPattern 1 arg
+                                head ++ " " ++ printPattern locals 1 arg
 
                             Nothing ->
                                 head
@@ -453,7 +522,7 @@ printPattern prec pattern =
                             ++ String.join ", "
                                 (Array.indexedMap
                                     (\index arg ->
-                                        fieldLabel index ++ " = " ++ printPattern 0 arg
+                                        fieldLabel index ++ " = " ++ printPattern locals 0 arg
                                     )
                                     args
                                 )
@@ -472,7 +541,7 @@ printPattern prec pattern =
         PatAs { pattern = inner, name = name } ->
             let
                 rendered =
-                    printPattern 1 inner ++ " as " ++ name
+                    printPattern locals 1 inner ++ " as " ++ name
             in
             if prec > 0 then
                 "(" ++ rendered ++ ")"
@@ -481,8 +550,8 @@ printPattern prec pattern =
                 rendered
 
 
-printConsPattern : Pattern -> Pattern -> String
-printConsPattern head tail =
+printConsPattern : Dict String {} -> Pattern -> Pattern -> String
+printConsPattern locals head tail =
     when head is
         PatVar h ->
             when tail is
@@ -503,8 +572,8 @@ printConsPattern head tail =
             "_ {- unported-cons-pattern -}"
 
 
-printTuplePattern : Array Pattern -> String
-printTuplePattern items =
+printTuplePattern : Dict String {} -> Array Pattern -> String
+printTuplePattern locals items =
     let
         labels =
             tupleFieldLabels (Array.length items)
@@ -517,7 +586,7 @@ printTuplePattern items =
             ++ String.join ", "
                 (Array.map2
                     (\label item ->
-                        label ++ " = " ++ printPattern 0 item
+                        label ++ " = " ++ printPattern locals 0 item
                     )
                     labels
                     items
@@ -525,8 +594,8 @@ printTuplePattern items =
             ++ " }"
 
 
-printExpr : Int -> Expr -> String
-printExpr prec expr =
+printExpr : Dict String {} -> Int -> Expr -> String
+printExpr locals prec expr =
     when expr is
         ExprUnit ->
             "{}"
@@ -539,18 +608,18 @@ printExpr prec expr =
                 Just { first = first, rest = rest } ->
                     let
                         rendered =
-                            when multiArgCtorApplication first rest is
+                            when multiArgCtorApplication locals first rest is
                                 Just text ->
                                     text
 
                                 Nothing ->
                                     if Array.isEmpty rest then
-                                        printExpr 1 first
+                                        printExpr locals 1 first
 
                                     else
-                                        printExpr 1 first
+                                        printExpr locals 1 first
                                             ++ " "
-                                            ++ String.join " " (Array.map (printExpr 1) rest)
+                                            ++ String.join " " (Array.map (printExpr locals 1) rest)
                     in
                     if prec > 0 then
                         "(" ++ rendered ++ ")"
@@ -561,7 +630,7 @@ printExpr prec expr =
         ExprBinop { operator = op, left = left, right = right } ->
             let
                 rendered =
-                    printExpr 1 left ++ " " ++ op ++ " " ++ printExpr 1 right
+                    printExpr locals 1 left ++ " " ++ op ++ " " ++ printExpr locals 1 right
             in
             if prec > 0 then
                 "(" ++ rendered ++ ")"
@@ -570,17 +639,17 @@ printExpr prec expr =
                 rendered
 
         ExprVar ref ->
-            printNamedRef False ref
+            printNamedRef locals False ref
 
         ExprIf { condition = condition, then_ = ifTrue, else_ = ifFalse } ->
             let
                 rendered =
                     "if "
-                        ++ printExpr 0 condition
+                        ++ printExpr locals 0 condition
                         ++ " then\n    "
-                        ++ indentBlock 1 (printExpr 0 ifTrue)
+                        ++ indentBlock 1 (printExpr locals 0 ifTrue)
                         ++ "\n\nelse\n    "
-                        ++ indentBlock 1 (printExpr 0 ifFalse)
+                        ++ indentBlock 1 (printExpr locals 0 ifFalse)
             in
             if prec > 0 then
                 "(" ++ rendered ++ ")"
@@ -604,7 +673,7 @@ printExpr prec expr =
             String.fromFloat value
 
         ExprNegation inner ->
-            "-" ++ printExpr 1 inner
+            "-" ++ printExpr locals 1 inner
 
         ExprString value ->
             "\"" ++ escapeString value ++ "\""
@@ -613,20 +682,20 @@ printExpr prec expr =
             "'" ++ escapeChar value ++ "'"
 
         ExprTuple items ->
-            printTupleExpr items
+            printTupleExpr locals items
 
         ExprLet { declarations = declarations, expression = body } ->
             let
                 decls =
                     declarations
-                        |> Array.map printLetDecl
+                        |> Array.map (printLetDecl locals)
                         |> String.join "\n\n    "
 
                 rendered =
                     "let\n    "
                         ++ decls
                         ++ "\nin\n"
-                        ++ printExpr 0 body
+                        ++ printExpr locals 0 body
             in
             if prec > 0 then
                 "(" ++ rendered ++ ")"
@@ -638,12 +707,12 @@ printExpr prec expr =
             let
                 armText =
                     arms
-                        |> Array.map printCaseArm
+                        |> Array.map (printCaseArm locals)
                         |> String.join "\n\n    "
 
                 rendered =
                     "when "
-                        ++ printExpr 0 scrutinee
+                        ++ printExpr locals 0 scrutinee
                         ++ " is\n    "
                         ++ armText
             in
@@ -657,9 +726,9 @@ printExpr prec expr =
             let
                 rendered =
                     "\\"
-                        ++ String.join " " (Array.map (printPattern 1) arguments)
+                        ++ String.join " " (Array.map (printPattern locals 1) arguments)
                         ++ " -> "
-                        ++ printExpr 0 body
+                        ++ printExpr locals 0 body
             in
             if prec > 0 then
                 "(" ++ rendered ++ ")"
@@ -676,17 +745,17 @@ printExpr prec expr =
                     ++ String.join ", "
                         (Array.map
                             (\field ->
-                                field.name ++ " = " ++ printExpr 0 field.value
+                                field.name ++ " = " ++ printExpr locals 0 field.value
                             )
                             fields
                         )
                     ++ " }"
 
         ExprList items ->
-            "[" ++ String.join ", " (Array.map (printExpr 0) items) ++ "]"
+            "[" ++ String.join ", " (Array.map (printExpr locals 0) items) ++ "]"
 
         ExprAccess { record = record, field = field } ->
-            printExpr 1 record ++ "." ++ field
+            printExpr locals 1 record ++ "." ++ field
 
         ExprAccessFunction field ->
             "." ++ field
@@ -698,7 +767,7 @@ printExpr prec expr =
                 ++ String.join ", "
                     (Array.map
                         (\field ->
-                            field.name ++ " = " ++ printExpr 0 field.value
+                            field.name ++ " = " ++ printExpr locals 0 field.value
                         )
                         fields
                     )
@@ -708,8 +777,8 @@ printExpr prec expr =
             "[glsl| " ++ code ++ " |]"
 
 
-printTupleExpr : Array Expr -> String
-printTupleExpr items =
+printTupleExpr : Dict String {} -> Array Expr -> String
+printTupleExpr locals items =
     let
         labels =
             tupleFieldLabels (Array.length items)
@@ -722,7 +791,7 @@ printTupleExpr items =
             ++ String.join ", "
                 (Array.map2
                     (\label item ->
-                        label ++ " = " ++ printExpr 0 item
+                        label ++ " = " ++ printExpr locals 0 item
                     )
                     labels
                     items
@@ -730,15 +799,15 @@ printTupleExpr items =
             ++ " }"
 
 
-printCaseArm : CaseArm -> String
-printCaseArm arm =
-    printPattern 0 arm.pattern
+printCaseArm : Dict String {} -> CaseArm -> String
+printCaseArm locals arm =
+    printPattern locals 0 arm.pattern
         ++ " ->\n        "
-        ++ indentBlock 2 (printExpr 0 arm.body)
+        ++ indentBlock 2 (printExpr locals 0 arm.body)
 
 
-printLetDecl : LetDecl -> String
-printLetDecl declaration =
+printLetDecl : Dict String {} -> LetDecl -> String
+printLetDecl locals declaration =
     when declaration is
         LetFunction fn ->
             let
@@ -747,22 +816,22 @@ printLetDecl declaration =
                         ""
 
                     else
-                        " " ++ String.join " " (Array.map (printPattern 1) fn.arguments)
+                        " " ++ String.join " " (Array.map (printPattern locals 1) fn.arguments)
             in
-            fn.name ++ args ++ " =\n        " ++ indentBlock 2 (printExpr 0 fn.expression)
+            fn.name ++ args ++ " =\n        " ++ indentBlock 2 (printExpr locals 0 fn.expression)
 
         LetDestructure { pattern = pattern, expression = expression } ->
             -- Constructor / record / tuple patterns must be parenthesized on the
             -- left of `=`; bare `RD first =` is parsed as a function definition.
-            printPattern 1 pattern
+            printPattern locals 1 pattern
                 ++ " =\n        "
-                ++ indentBlock 2 (printExpr 0 expression)
+                ++ indentBlock 2 (printExpr locals 0 expression)
 
 
 {-| Uppercase head applied to 2+ args → Gren multi-arg ctor record form.
 -}
-multiArgCtorApplication : Expr -> Array Expr -> Maybe String
-multiArgCtorApplication head args =
+multiArgCtorApplication : Dict String {} -> Expr -> Array Expr -> Maybe String
+multiArgCtorApplication locals head args =
     if Array.length args < 2 then
         Nothing
 
@@ -771,12 +840,12 @@ multiArgCtorApplication head args =
             ExprVar ref ->
                 if startsUpper ref.name then
                     Just
-                        (printNamedRef False ref
+                        (printNamedRef locals False ref
                             ++ " { "
                             ++ String.join ", "
                                 (Array.indexedMap
                                     (\index arg ->
-                                        fieldLabel index ++ " = " ++ printExpr 0 arg
+                                        fieldLabel index ++ " = " ++ printExpr locals 0 arg
                                     )
                                     args
                                 )
@@ -790,25 +859,62 @@ multiArgCtorApplication head args =
                 Nothing
 
 
-printNamedRef : Bool -> NamedRef -> String
-printNamedRef isType ref =
+printNamedRef : Dict String {} -> Bool -> NamedRef -> String
+printNamedRef locals isType ref =
     when ref.moduleName is
         Nothing ->
             ref.name
 
         Just moduleName ->
-            if isType then
-                if moduleName == ref.name || String.endsWith ("." ++ ref.name) moduleName then
+            let
+                short =
                     ref.name
 
-                else
+                long =
                     moduleName ++ "." ++ ref.name
 
+                sameModuleType =
+                    moduleName
+                        == ref.name
+                        || String.endsWith ("." ++ ref.name) moduleName
+
+                -- Local declaration shadows the short name (e.g. this file defines `Dict`).
+                clashes =
+                    Dict.member short locals
+            in
+            if isType then
+                if sameModuleType then
+                    -- Prefer `Dict.Dict` over bare `Dict`: `import Dict` does not
+                    -- expose the type, and bare `Dict` also collides with local types.
+                    if isDefaultTypeModule moduleName then
+                        short
+
+                    else
+                        long
+
+                else
+                    long
+
             else if isDefaultCtor moduleName ref.name then
-                ref.name
+                short
+
+            else if clashes && sameModuleType then
+                long
 
             else
-                moduleName ++ "." ++ ref.name
+                long
+
+
+{-| Types commonly written unqualified after `import X exposing (..)` / defaults.
+-}
+isDefaultTypeModule : String -> Bool
+isDefaultTypeModule moduleName =
+    Array.member moduleName
+        [ "Maybe"
+        , "Result"
+        , "Order"
+        , "Basics"
+        ]
 
 
 isDefaultCtor : String -> String -> Bool

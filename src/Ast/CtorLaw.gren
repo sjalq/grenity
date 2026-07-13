@@ -263,9 +263,13 @@ etaExpand ref arity supplied seed =
         restVars =
             Array.map (\n -> ExprVar { moduleName = Nothing, name = n }) argNames
 
+        -- Gren `Array.append a b` is b then a (prepends b). Build a++b via fold.
+        allArgs =
+            Array.foldl Array.pushLast supplied restVars
+
         body =
             ExprApplication
-                (Array.pushFirst (ExprVar ref) (Array.append supplied restVars))
+                (Array.pushFirst (ExprVar ref) allArgs)
     in
     if missing <= 0 then
         body

@@ -25,6 +25,7 @@ import Ast.CtorLaw as AstCtorLaw
 import Ast.MatchCompile as AstMatchCompile
 import Ast.NameSub as AstNameSub
 import Ast.Print as AstPrint
+import Ast.RecordAlias as AstRecordAlias
 import Ast.Reserved as AstReserved
 import Char
 import Dict exposing (Dict)
@@ -353,6 +354,10 @@ transform registry extraction sources =
     validateExtraction extraction sources
         |> Result.andThen
             (\_ ->
+                let
+                    packageRecordAliases =
+                        collectPackageRecordAliases extraction.modules
+                in
                 sources
                     |> Array.sortBy (\source -> (normalizePath source.path).path)
                     |> Array.foldl
@@ -361,7 +366,7 @@ transform registry extraction sources =
                                 |> Result.andThen
                                     (\modules ->
                                         findMatchingExtraction source.path extraction.modules
-                                            |> Result.andThen (transformModule registry source)
+                                            |> Result.andThen (transformModule registry packageRecordAliases source)
                                             |> Result.map (\module_ -> Array.pushLast module_ modules)
                                     )
                         )
@@ -391,8 +396,30 @@ transform registry extraction sources =
             )
 
 
-transformModule : Registry -> SourceFile -> Protocol.ModuleExtraction -> Result Error TransformedModule
-transformModule registry input extraction =
+{-| `"Module.AliasName"` → ordered record field names, from every AST in the package.
+-}
+collectPackageRecordAliases : Array Protocol.ModuleExtraction -> Dict String (Array String)
+collectPackageRecordAliases modules =
+    Array.foldl
+        (\moduleExtraction acc ->
+            when moduleExtraction.ast is
+                Nothing ->
+                    acc
+
+                Just astValue ->
+                    when AstDecode.decode astValue is
+                        Err _ ->
+                            acc
+
+                        Ok file ->
+                            Dict.foldl Dict.set acc (AstRecordAlias.collectFromFile file)
+        )
+        Dict.empty
+        modules
+
+
+transformModule : Registry -> Dict String (Array String) -> SourceFile -> Protocol.ModuleExtraction -> Result Error TransformedModule
+transformModule registry packageRecordAliases input extraction =
     toGrenSourcePath input.path
         |> Result.andThen
             (\outputPath ->
@@ -405,18 +432,19 @@ transformModule registry input extraction =
                             |> Result.map (withTransformPath input extraction "fallback:no-ast")
 
                     Just astValue ->
-                        transformModuleViaAst registry input extraction outputPath astValue
+                        transformModuleViaAst registry packageRecordAliases input extraction outputPath astValue
             )
 
 
 transformModuleViaAst :
     Registry
+    -> Dict String (Array String)
     -> SourceFile
     -> Protocol.ModuleExtraction
     -> String
     -> Decode.Value
     -> Result Error TransformedModule
-transformModuleViaAst registry input extraction outputPath astValue =
+transformModuleViaAst registry packageRecordAliases input extraction outputPath astValue =
     when AstDecode.decode astValue is
         Err decodeError ->
             Err <|
@@ -432,6 +460,7 @@ transformModuleViaAst registry input extraction outputPath astValue =
                 lowered =
                     file
                         |> AstNameSub.apply registry
+                        |> AstRecordAlias.apply packageRecordAliases
                         |> AstCtorLaw.apply
                         |> AstMatchCompile.compile
                         |> AstReserved.apply

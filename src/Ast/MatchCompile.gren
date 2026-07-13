@@ -1183,12 +1183,15 @@ finishLastHead seed scope headExpr tailExpr headPat rest body fail =
 
 {-| Bind a pattern against a value without a top-level `when value is <pat>`.
 
-Gren (like Elm) must not case-match bare records/tuples as the scrutinee of
-`when` — that path can crash the compiler (`Map.!: key not found`). Prefer:
+Gren (like Elm) must not case-match bare records as the scrutinee of `when`.
+Prefer:
 
 - `let name = value` for vars
-- `let <record/tuple pat> = value` for structural irrefutable patterns
-- `when value is` only for refutable custom-type patterns
+- simple `let { a = x, b = y } = value` only when every field is a var/`_`
+- nested ctors inside records/tuples: bind the whole record to a temp, then
+  peel fields with let/access and `when` for named ctors (let cannot nest
+  `Column fn` inside a record pattern)
+- `when value is` for refutable custom-type patterns
 -}
 bindIrrefutable : Pattern -> Expr -> Expr -> Expr -> Expr
 bindIrrefutable pattern value body fail =
@@ -1202,28 +1205,38 @@ bindIrrefutable pattern value body fail =
         PatAs { pattern = inner, name = name } ->
             wrapLet name value (bindIrrefutable inner (var name) body fail)
 
-        PatRecordBind _ ->
-            wrapDestructure pattern value body
-
-        PatRecord _ ->
-            wrapDestructure pattern value body
-
-        PatTuple _ ->
-            wrapDestructure pattern value body
-
-        PatNamed { arguments = args } ->
-            -- Custom-type / Just / Nothing etc.: needs a real match.
-            if isIrrefutable pattern then
+        PatRecordBind fields ->
+            if Array.all (\f -> isSimpleBind f.pattern) fields then
                 wrapDestructure pattern value body
 
             else
-                ExprCase
-                    { expression = value
-                    , cases =
-                        [ { pattern = pattern, body = body }
-                        , { pattern = PatAll, body = fail }
-                        ]
-                    }
+                bindComplexRecord fields value body fail
+
+        PatRecord names ->
+            wrapDestructure pattern value body
+
+        PatTuple items ->
+            -- Tuples print as records; reuse record peel with first/second/...
+            let
+                labels =
+                    tupleBindLabels (Array.length items)
+
+                fields =
+                    Array.map2
+                        (\name item -> { name = name, pattern = item })
+                        labels
+                        items
+            in
+            bindIrrefutable (PatRecordBind fields) value body fail
+
+        PatNamed _ ->
+            ExprCase
+                { expression = value
+                , cases =
+                    [ { pattern = pattern, body = body }
+                    , { pattern = PatAll, body = fail }
+                    ]
+                }
 
         _ ->
             ExprCase
@@ -1233,6 +1246,82 @@ bindIrrefutable pattern value body fail =
                     , { pattern = PatAll, body = fail }
                     ]
                 }
+
+
+isSimpleBind : Pattern -> Bool
+isSimpleBind pattern =
+    when pattern is
+        PatVar _ ->
+            True
+
+        PatAll ->
+            True
+
+        _ ->
+            False
+
+
+tupleBindLabels : Int -> Array String
+tupleBindLabels count =
+    Array.initialize count 0 fieldBindLabel
+
+
+fieldBindLabel : Int -> String
+fieldBindLabel index =
+    when index is
+        0 ->
+            "first"
+
+        1 ->
+            "second"
+
+        2 ->
+            "third"
+
+        3 ->
+            "fourth"
+
+        4 ->
+            "fifth"
+
+        5 ->
+            "sixth"
+
+        6 ->
+            "seventh"
+
+        7 ->
+            "eighth"
+
+        _ ->
+            "field" ++ String.fromInt (index + 1)
+
+
+{-| Bind a record with nested patterns: temp = value; then peel each field.
+-}
+bindComplexRecord :
+    Array { name : String, pattern : Pattern }
+    -> Expr
+    -> Expr
+    -> Expr
+    -> Expr
+bindComplexRecord fields value body fail =
+    let
+        temp =
+            "rb_" ++ String.fromInt (Array.length fields) ++ "_" ++ String.fromInt 0
+
+        peeled =
+            Array.foldr
+                (\field cont ->
+                    bindIrrefutable field.pattern
+                        (ExprAccess { record = var temp, field = field.name })
+                        cont
+                        fail
+                )
+                body
+                fields
+    in
+    wrapLet temp value peeled
 
 
 wrapDestructure : Pattern -> Expr -> Expr -> Expr

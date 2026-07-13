@@ -10,6 +10,10 @@ live in Gren patterns** (`Just { first = x, rest = xs }`), not reconstructed
 lets. Synthetic names are only for intermediate list temps.
 
 Law: free variables of each arm body stay bound by the compiled pattern tree.
+
+Gren forbids shadowing, so every pattern binder is α-renamed against an
+occupied-name scope before placement; free occurrences in the arm body are
+renamed to match. Outer `as` names on cons arms bind the whole list.
 -}
 
 import Array exposing (Array)
@@ -22,7 +26,439 @@ import Ast.Types exposing
     , NamedRef
     , Pattern(..)
     )
+import Dict exposing (Dict)
 import Maybe exposing (Maybe(..))
+
+
+-- SCOPE / α-RENAME ------------------------------------------------------------
+
+
+type alias Scope =
+    { occupied : Dict String {} }
+
+
+emptyScope : Scope
+emptyScope =
+    { occupied = Dict.empty }
+
+
+occupy : String -> Scope -> Scope
+occupy name scope =
+    { occupied = Dict.set name {} scope.occupied }
+
+
+occupyAll : Array String -> Scope -> Scope
+occupyAll names scope =
+    Array.foldl occupy scope names
+
+
+freshName : String -> Scope -> String
+freshName base scope =
+    if not (Dict.member base scope.occupied) then
+        base
+
+    else
+        freshNameHelp base 1 scope
+
+
+freshNameHelp : String -> Int -> Scope -> String
+freshNameHelp base n scope =
+    let
+        candidate =
+            base ++ "_" ++ String.fromInt n
+    in
+    if Dict.member candidate scope.occupied then
+        freshNameHelp base (n + 1) scope
+
+    else
+        candidate
+
+
+{-| Bind one name: keep if free, else freshen. Returns subst old→new when renamed.
+-}
+bindName : String -> Scope -> { name : String, scope : Scope, subst : Dict String String }
+bindName name scope =
+    let
+        newName =
+            freshName name scope
+    in
+    { name = newName
+    , scope = occupy newName scope
+    , subst =
+        if newName == name then
+            Dict.empty
+
+        else
+            Dict.singleton name newName
+    }
+
+
+mergeSubst : Dict String String -> Dict String String -> Dict String String
+mergeSubst left right =
+    Array.foldl
+        (\key acc ->
+            when Dict.get key right is
+                Just value ->
+                    Dict.set key value acc
+
+                Nothing ->
+                    acc
+        )
+        left
+        (Dict.keys right)
+
+
+type alias BindResult =
+    { pattern : Pattern
+    , scope : Scope
+    , subst : Dict String String
+    }
+
+
+bindPattern : Pattern -> Scope -> BindResult
+bindPattern pattern scope =
+    when pattern is
+        PatVar name ->
+            let
+                bound =
+                    bindName name scope
+            in
+            { pattern = PatVar bound.name
+            , scope = bound.scope
+            , subst = bound.subst
+            }
+
+        PatAll ->
+            { pattern = PatAll, scope = scope, subst = Dict.empty }
+
+        PatAs { pattern = inner, name = name } ->
+            let
+                innerR =
+                    bindPattern inner scope
+
+                bound =
+                    bindName name innerR.scope
+            in
+            { pattern = PatAs { pattern = innerR.pattern, name = bound.name }
+            , scope = bound.scope
+            , subst = mergeSubst innerR.subst bound.subst
+            }
+
+        PatNamed { ref = ref, arguments = args } ->
+            let
+                folded =
+                    bindPatternList args scope
+            in
+            { pattern = PatNamed { ref = ref, arguments = folded.patterns }
+            , scope = folded.scope
+            , subst = folded.subst
+            }
+
+        PatTuple items ->
+            let
+                folded =
+                    bindPatternList items scope
+            in
+            { pattern = PatTuple folded.patterns
+            , scope = folded.scope
+            , subst = folded.subst
+            }
+
+        PatList items ->
+            let
+                folded =
+                    bindPatternList items scope
+            in
+            { pattern = PatList folded.patterns
+            , scope = folded.scope
+            , subst = folded.subst
+            }
+
+        PatCons { head = head, tail = tail } ->
+            let
+                headR =
+                    bindPattern head scope
+
+                tailR =
+                    bindPattern tail headR.scope
+            in
+            { pattern = PatCons { head = headR.pattern, tail = tailR.pattern }
+            , scope = tailR.scope
+            , subst = mergeSubst headR.subst tailR.subst
+            }
+
+        PatRecordBind fields ->
+            let
+                folded =
+                    Array.foldl
+                        (\field acc ->
+                            let
+                                r =
+                                    bindPattern field.pattern acc.scope
+                            in
+                            { patterns =
+                                Array.pushLast
+                                    { name = field.name, pattern = r.pattern }
+                                    acc.patterns
+                            , scope = r.scope
+                            , subst = mergeSubst acc.subst r.subst
+                            }
+                        )
+                        { patterns = [], scope = scope, subst = Dict.empty }
+                        fields
+            in
+            { pattern = PatRecordBind folded.patterns
+            , scope = folded.scope
+            , subst = folded.subst
+            }
+
+        PatRecord names ->
+            { pattern = PatRecord names, scope = scope, subst = Dict.empty }
+
+        _ ->
+            { pattern = pattern, scope = scope, subst = Dict.empty }
+
+
+bindPatternList :
+    Array Pattern
+    -> Scope
+    -> { patterns : Array Pattern, scope : Scope, subst : Dict String String }
+bindPatternList patterns scope =
+    Array.foldl
+        (\pat acc ->
+            let
+                r =
+                    bindPattern pat acc.scope
+            in
+            { patterns = Array.pushLast r.pattern acc.patterns
+            , scope = r.scope
+            , subst = mergeSubst acc.subst r.subst
+            }
+        )
+        { patterns = [], scope = scope, subst = Dict.empty }
+        patterns
+
+
+patternBinders : Pattern -> Array String
+patternBinders pattern =
+    when pattern is
+        PatVar name ->
+            [ name ]
+
+        PatAs { pattern = inner, name = name } ->
+            Array.pushLast name (patternBinders inner)
+
+        PatNamed { arguments = args } ->
+            Array.foldl (\p acc -> Array.append acc (patternBinders p)) [] args
+
+        PatTuple items ->
+            Array.foldl (\p acc -> Array.append acc (patternBinders p)) [] items
+
+        PatList items ->
+            Array.foldl (\p acc -> Array.append acc (patternBinders p)) [] items
+
+        PatCons { head = head, tail = tail } ->
+            Array.append (patternBinders head) (patternBinders tail)
+
+        PatRecordBind fields ->
+            Array.foldl (\f acc -> Array.append acc (patternBinders f.pattern)) [] fields
+
+        _ ->
+            []
+
+
+{-| Rename free variables according to subst. Binders shadow subst entries.
+-}
+renameExpr : Dict String String -> Expr -> Expr
+renameExpr subst expr =
+    if Array.isEmpty (Dict.keys subst) then
+        expr
+
+    else
+        renameExprHelp subst expr
+
+
+renameExprHelp : Dict String String -> Expr -> Expr
+renameExprHelp subst expr =
+    when expr is
+        ExprVar ref ->
+            when ref.moduleName is
+                Just _ ->
+                    expr
+
+                Nothing ->
+                    when Dict.get ref.name subst is
+                        Just newName ->
+                            ExprVar { moduleName = Nothing, name = newName }
+
+                        Nothing ->
+                            expr
+
+        ExprApplication parts ->
+            ExprApplication (Array.map (renameExprHelp subst) parts)
+
+        ExprBinop { operator = op, left = left, right = right } ->
+            ExprBinop
+                { operator = op
+                , left = renameExprHelp subst left
+                , right = renameExprHelp subst right
+                }
+
+        ExprIf { condition = c, then_ = t, else_ = e } ->
+            ExprIf
+                { condition = renameExprHelp subst c
+                , then_ = renameExprHelp subst t
+                , else_ = renameExprHelp subst e
+                }
+
+        ExprNegation inner ->
+            ExprNegation (renameExprHelp subst inner)
+
+        ExprTuple items ->
+            ExprTuple (Array.map (renameExprHelp subst) items)
+
+        ExprList items ->
+            ExprList (Array.map (renameExprHelp subst) items)
+
+        ExprRecord fields ->
+            ExprRecord
+                (Array.map
+                    (\f -> { name = f.name, value = renameExprHelp subst f.value })
+                    fields
+                )
+
+        ExprAccess { record = record, field = field } ->
+            ExprAccess { record = renameExprHelp subst record, field = field }
+
+        ExprUpdate { name = name, fields = fields } ->
+            let
+                newName =
+                    when Dict.get name subst is
+                        Just n ->
+                            n
+
+                        Nothing ->
+                            name
+            in
+            ExprUpdate
+                { name = newName
+                , fields =
+                    Array.map
+                        (\f -> { name = f.name, value = renameExprHelp subst f.value })
+                        fields
+                }
+
+        ExprLambda { arguments = arguments, expression = body } ->
+            let
+                binders =
+                    Array.foldl (\p acc -> Array.append acc (patternBinders p)) [] arguments
+
+                bodySubst =
+                    dropKeys binders subst
+            in
+            ExprLambda
+                { arguments = arguments
+                , expression = renameExprHelp bodySubst body
+                }
+
+        ExprLet { declarations = declarations, expression = body } ->
+            renameLet subst declarations body
+
+        ExprCase { expression = scrutinee, cases = arms } ->
+            ExprCase
+                { expression = renameExprHelp subst scrutinee
+                , cases =
+                    Array.map
+                        (\arm ->
+                            let
+                                binders =
+                                    patternBinders arm.pattern
+
+                                bodySubst =
+                                    dropKeys binders subst
+                            in
+                            { pattern = arm.pattern
+                            , body = renameExprHelp bodySubst arm.body
+                            }
+                        )
+                        arms
+                }
+
+        _ ->
+            expr
+
+
+dropKeys : Array String -> Dict String String -> Dict String String
+dropKeys keys dict =
+    let
+        dropSet =
+            Array.foldl (\k s -> Dict.set k {} s) Dict.empty keys
+    in
+    Array.foldl
+        (\k acc ->
+            if Dict.member k dropSet then
+                acc
+
+            else
+                when Dict.get k dict is
+                    Just v ->
+                        Dict.set k v acc
+
+                    Nothing ->
+                        acc
+        )
+        Dict.empty
+        (Dict.keys dict)
+
+
+renameLet : Dict String String -> Array LetDecl -> Expr -> Expr
+renameLet subst declarations body =
+    let
+        step =
+            Array.foldl
+                (\decl acc ->
+                    when decl is
+                        LetFunction fn ->
+                            let
+                                argBinders =
+                                    Array.foldl (\p a -> Array.append a (patternBinders p)) [] fn.arguments
+
+                                -- Name + args shadow free renames inside the fn body.
+                                fnBodySubst =
+                                    dropKeys (Array.pushLast fn.name argBinders) acc.subst
+
+                                newDecl =
+                                    LetFunction
+                                        { fn
+                                            | expression = renameExprHelp fnBodySubst fn.expression
+                                        }
+                            in
+                            { decls = Array.pushLast newDecl acc.decls
+                            , subst = dropKeys [ fn.name ] acc.subst
+                            }
+
+                        LetDestructure { pattern = pattern, expression = expression } ->
+                            let
+                                binders =
+                                    patternBinders pattern
+
+                                newDecl =
+                                    LetDestructure
+                                        { pattern = pattern
+                                        , expression = renameExprHelp acc.subst expression
+                                        }
+                            in
+                            { decls = Array.pushLast newDecl acc.decls
+                            , subst = dropKeys binders acc.subst
+                            }
+                )
+                { decls = [], subst = subst }
+                declarations
+    in
+    ExprLet
+        { declarations = step.decls
+        , expression = renameExprHelp step.subst body
+        }
 
 
 compile : File -> File
@@ -345,6 +781,18 @@ compileListCase seed scrutinee arms =
         scrut =
             "ls_" ++ String.fromInt seed
 
+        headN =
+            scrut ++ "_h"
+
+        tailN =
+            scrut ++ "_t"
+
+        scope0 =
+            emptyScope
+                |> occupy scrut
+                |> occupy headN
+                |> occupy tailN
+
         catchAll =
             firstCatchAll arms
 
@@ -361,7 +809,11 @@ compileListCase seed scrutinee arms =
                         Just { name = name, body = body } ->
                             when name is
                                 Just n ->
-                                    wrapLet n (var scrut) body
+                                    let
+                                        bound =
+                                            bindName n scope0
+                                    in
+                                    wrapLet bound.name (var scrut) (renameExpr bound.subst body)
 
                                 Nothing ->
                                     body
@@ -377,12 +829,13 @@ compileListCase seed scrutinee arms =
         justBranch =
             { pattern =
                 justRecord
-                    (PatVar (scrut ++ "_h"))
-                    (PatVar (scrut ++ "_t"))
+                    (PatVar headN)
+                    (PatVar tailN)
             , body =
                 matchConsArms (seed + 1)
-                    (var (scrut ++ "_h"))
-                    (var (scrut ++ "_t"))
+                    scope0
+                    (var headN)
+                    (var tailN)
                     (var scrut)
                     consArms
                     catchAll
@@ -409,11 +862,16 @@ type alias ConsShape =
     { heads : Array Pattern
     , rest : Pattern
     , body : Expr
+    , asName : Maybe String
     }
 
 
 consArmShape : CaseArm -> Maybe ConsShape
 consArmShape arm =
+    let
+        asName =
+            topAsName arm.pattern
+    in
     when stripAs arm.pattern is
         PatAll ->
             Nothing
@@ -430,6 +888,7 @@ consArmShape arm =
                     { heads = members
                     , rest = PatList []
                     , body = arm.body
+                    , asName = asName
                     }
 
         PatCons _ ->
@@ -439,8 +898,19 @@ consArmShape arm =
                         { heads = hr.heads
                         , rest = hr.rest
                         , body = arm.body
+                        , asName = asName
                         }
                     )
+
+        _ ->
+            Nothing
+
+
+topAsName : Pattern -> Maybe String
+topAsName pattern =
+    when pattern is
+        PatAs { name = name } ->
+            Just name
 
         _ ->
             Nothing
@@ -484,9 +954,11 @@ firstCatchAll arms =
 
 
 {-| Try each cons arm against head/tail already peeled once. Binders stay in patterns.
+α-renames binders against `scope` so nested fallthrough arms never shadow.
 -}
 matchConsArms :
     Int
+    -> Scope
     -> Expr
     -> Expr
     -> Expr
@@ -494,14 +966,18 @@ matchConsArms :
     -> Maybe { name : Maybe String, body : Expr }
     -> Expr
     -> Expr
-matchConsArms seed headExpr tailExpr wholeList consArms catchAll fail =
+matchConsArms seed scope headExpr tailExpr wholeList consArms catchAll fail =
     when Array.popFirst consArms is
         Nothing ->
             when catchAll is
                 Just { name = name, body = body } ->
                     when name is
                         Just n ->
-                            wrapLet n wholeList body
+                            let
+                                bound =
+                                    bindName n scope
+                            in
+                            wrapLet bound.name wholeList (renameExpr bound.subst body)
 
                         Nothing ->
                             body
@@ -511,17 +987,67 @@ matchConsArms seed headExpr tailExpr wholeList consArms catchAll fail =
 
         Just { first = arm, rest = more } ->
             let
+                -- Outer `as` on the cons arm binds the whole list (e.g. `(q :: _) as qs`).
+                asBound =
+                    when arm.asName is
+                        Just n ->
+                            let
+                                b =
+                                    bindName n scope
+                            in
+                            { scope = b.scope
+                            , subst = b.subst
+                            , wrap =
+                                \body -> wrapLet b.name wholeList body
+                            }
+
+                        Nothing ->
+                            { scope = scope
+                            , subst = Dict.empty
+                            , wrap = \body -> body
+                            }
+
+                headsBound =
+                    bindPatternList arm.heads asBound.scope
+
+                restBound =
+                    bindPattern arm.rest headsBound.scope
+
+                bodyRenamed =
+                    arm.body
+                        |> renameExpr asBound.subst
+                        |> renameExpr headsBound.subst
+                        |> renameExpr restBound.subst
+                        |> asBound.wrap
+
+                -- Fallthrough sits under this arm's binders for irrefutable heads;
+                -- occupy them so the next arm α-renames collisions.
                 nextFail =
-                    matchConsArms (seed + 17) headExpr tailExpr wholeList more catchAll fail
+                    matchConsArms (seed + 17)
+                        restBound.scope
+                        headExpr
+                        tailExpr
+                        wholeList
+                        more
+                        catchAll
+                        fail
             in
-            matchHeads (seed + 1) headExpr tailExpr arm.heads arm.rest arm.body nextFail
+            matchHeads (seed + 1)
+                restBound.scope
+                headExpr
+                tailExpr
+                headsBound.patterns
+                restBound.pattern
+                bodyRenamed
+                nextFail
 
 
 {-| Match remaining heads against current head value and tail list.
-First head matches headExpr (as pattern). Further heads peel tailExpr.
+Patterns are already α-renamed; scope tracks occupied synthetic names.
 -}
 matchHeads :
     Int
+    -> Scope
     -> Expr
     -> Expr
     -> Array Pattern
@@ -529,7 +1055,7 @@ matchHeads :
     -> Expr
     -> Expr
     -> Expr
-matchHeads seed headExpr tailExpr heads rest body fail =
+matchHeads seed scope headExpr tailExpr heads rest body fail =
     when Array.popFirst heads is
         Nothing ->
             -- Should not happen for cons shapes.
@@ -538,29 +1064,39 @@ matchHeads seed headExpr tailExpr heads rest body fail =
         Just { first = headPat, rest = moreHeads } ->
             if Array.isEmpty moreHeads then
                 -- Last head: bind headPat against headExpr, rest against tailExpr.
-                finishLastHead seed headExpr tailExpr headPat rest body fail
+                finishLastHead seed scope headExpr tailExpr headPat rest body fail
 
             else
                 -- More heads: bind this head, peel tail for the rest.
                 let
-                    tailName =
+                    tailBase =
                         "lt_" ++ String.fromInt seed
+
+                    tailB =
+                        bindName tailBase scope
+
+                    headB =
+                        bindName (tailB.name ++ "_h") tailB.scope
+
+                    tailTB =
+                        bindName (tailB.name ++ "_t") headB.scope
 
                     continue =
                         ExprCase
-                            { expression = popFirst (var tailName)
+                            { expression = popFirst (var tailB.name)
                             , cases =
                                 [ { pattern = nothingPat
                                   , body = fail
                                   }
                                 , { pattern =
                                         justRecord
-                                            (PatVar (tailName ++ "_h"))
-                                            (PatVar (tailName ++ "_t"))
+                                            (PatVar headB.name)
+                                            (PatVar tailTB.name)
                                   , body =
                                         matchHeads (seed + 1)
-                                            (var (tailName ++ "_h"))
-                                            (var (tailName ++ "_t"))
+                                            tailTB.scope
+                                            (var headB.name)
+                                            (var tailTB.name)
                                             moreHeads
                                             rest
                                             body
@@ -569,37 +1105,15 @@ matchHeads seed headExpr tailExpr heads rest body fail =
                                 ]
                             }
 
-                    -- headExpr must match headPat; bind tail list as tailName.
-                    -- Use: when headExpr is headPat -> let tailName = tailExpr in continue
-                    -- For simple headPat we can structure as case on a synthetic unit...
-                    -- Cleaner: case headExpr of headPat -> ...
+                    afterHead =
+                        wrapLet tailB.name tailExpr continue
                 in
-                if isIrrefutable headPat then
-                    ExprCase
-                        { expression = headExpr
-                        , cases =
-                            [ { pattern = headPat
-                              , body = wrapLet tailName tailExpr continue
-                              }
-                            ]
-                        }
-
-                else
-                    ExprCase
-                        { expression = headExpr
-                        , cases =
-                            [ { pattern = headPat
-                              , body = wrapLet tailName tailExpr continue
-                              }
-                            , { pattern = PatAll
-                              , body = fail
-                              }
-                            ]
-                        }
+                bindIrrefutable headPat headExpr afterHead fail
 
 
 finishLastHead :
     Int
+    -> Scope
     -> Expr
     -> Expr
     -> Pattern
@@ -607,28 +1121,16 @@ finishLastHead :
     -> Expr
     -> Expr
     -> Expr
-finishLastHead seed headExpr tailExpr headPat rest body fail =
+finishLastHead seed scope headExpr tailExpr headPat rest body fail =
     let
-        -- Irrefutable heads (var / _) need no fallthrough arm.
+        -- Irrefutable heads: bind with let (never `when x is y` — Gren can
+        -- crash on single-arm var cases over unconstrained types).
         withHeadMatch after =
-            if isIrrefutable headPat then
-                ExprCase
-                    { expression = headExpr
-                    , cases =
-                        [ { pattern = headPat, body = after } ]
-                    }
-
-            else
-                ExprCase
-                    { expression = headExpr
-                    , cases =
-                        [ { pattern = headPat, body = after }
-                        , { pattern = PatAll, body = fail }
-                        ]
-                    }
+            bindIrrefutable headPat headExpr after fail
     in
     when rest is
         PatVar restName ->
+            -- restName already α-renamed in matchConsArms.
             withHeadMatch (wrapLet restName tailExpr body)
 
         PatAll ->
@@ -650,12 +1152,76 @@ finishLastHead seed headExpr tailExpr headPat rest body fail =
                 fail
 
         PatAs { pattern = inner, name = asName } ->
+            -- rest already renamed; just place.
             wrapLet asName
                 tailExpr
-                (finishLastHead seed headExpr tailExpr headPat inner body fail)
+                (finishLastHead seed scope headExpr tailExpr headPat inner body fail)
 
         _ ->
             fail
+
+
+{-| Bind a pattern against a value without a top-level `when value is <pat>`.
+
+Gren (like Elm) must not case-match bare records/tuples as the scrutinee of
+`when` — that path can crash the compiler (`Map.!: key not found`). Prefer:
+
+- `let name = value` for vars
+- `let <record/tuple pat> = value` for structural irrefutable patterns
+- `when value is` only for refutable custom-type patterns
+-}
+bindIrrefutable : Pattern -> Expr -> Expr -> Expr -> Expr
+bindIrrefutable pattern value body fail =
+    when pattern is
+        PatVar name ->
+            wrapLet name value body
+
+        PatAll ->
+            body
+
+        PatAs { pattern = inner, name = name } ->
+            wrapLet name value (bindIrrefutable inner (var name) body fail)
+
+        PatRecordBind _ ->
+            wrapDestructure pattern value body
+
+        PatRecord _ ->
+            wrapDestructure pattern value body
+
+        PatTuple _ ->
+            wrapDestructure pattern value body
+
+        PatNamed { arguments = args } ->
+            -- Custom-type / Just / Nothing etc.: needs a real match.
+            if isIrrefutable pattern then
+                wrapDestructure pattern value body
+
+            else
+                ExprCase
+                    { expression = value
+                    , cases =
+                        [ { pattern = pattern, body = body }
+                        , { pattern = PatAll, body = fail }
+                        ]
+                    }
+
+        _ ->
+            ExprCase
+                { expression = value
+                , cases =
+                    [ { pattern = pattern, body = body }
+                    , { pattern = PatAll, body = fail }
+                    ]
+                }
+
+
+wrapDestructure : Pattern -> Expr -> Expr -> Expr
+wrapDestructure pattern value body =
+    ExprLet
+        { declarations =
+            [ LetDestructure { pattern = pattern, expression = value } ]
+        , expression = body
+        }
 
 
 isIrrefutable : Pattern -> Bool
@@ -925,6 +1491,40 @@ compileListPatternAsPayload :
     -> Expr
     -> { pattern : Pattern, body : Expr }
 compileListPatternAsPayload seed heads rest body =
+    compileListPatternAsPayloadScoped seed emptyScope heads rest body
+
+
+compileListPatternAsPayloadScoped :
+    Int
+    -> Scope
+    -> Array Pattern
+    -> Pattern
+    -> Expr
+    -> { pattern : Pattern, body : Expr }
+compileListPatternAsPayloadScoped seed scope heads rest body =
+    let
+        headsBound =
+            bindPatternList heads scope
+
+        restBound =
+            bindPattern rest headsBound.scope
+
+        body2 =
+            body
+                |> renameExpr headsBound.subst
+                |> renameExpr restBound.subst
+    in
+    compileListPatternAsPayloadBound seed restBound.scope headsBound.patterns restBound.pattern body2
+
+
+compileListPatternAsPayloadBound :
+    Int
+    -> Scope
+    -> Array Pattern
+    -> Pattern
+    -> Expr
+    -> { pattern : Pattern, body : Expr }
+compileListPatternAsPayloadBound seed scope heads rest body =
     when Array.popFirst heads is
         Nothing ->
             { pattern = nothingPat, body = body }
@@ -947,13 +1547,13 @@ compileListPatternAsPayload seed heads rest body =
                     PatList members ->
                         if Array.isEmpty members then
                             let
-                                tmp =
-                                    "pe_" ++ String.fromInt seed
+                                tmpB =
+                                    bindName ("pe_" ++ String.fromInt seed) scope
                             in
-                            { pattern = justRecord headPat (PatVar tmp)
+                            { pattern = justRecord headPat (PatVar tmpB.name)
                             , body =
                                 ExprCase
-                                    { expression = popFirst (var tmp)
+                                    { expression = popFirst (var tmpB.name)
                                     , cases =
                                         [ { pattern = nothingPat, body = body }
                                         , { pattern = PatAll
@@ -972,16 +1572,15 @@ compileListPatternAsPayload seed heads rest body =
             else
                 -- Multi-depth under wrapper: Just { first = h0, rest = t0 }, then peel t0 in body.
                 let
-                    t0 =
-                        "pw_" ++ String.fromInt seed
+                    t0B =
+                        bindName ("pw_" ++ String.fromInt seed) scope
 
                     nested =
-                        compileListPatternAsPayload (seed + 1) more rest body
+                        compileListPatternAsPayloadBound (seed + 1) t0B.scope more rest body
 
-                    -- body needs when popFirst t0 is nested.pattern -> nested.body
-                    body2 =
+                    body3 =
                         ExprCase
-                            { expression = popFirst (var t0)
+                            { expression = popFirst (var t0B.name)
                             , cases =
                                 [ { pattern = nested.pattern, body = nested.body }
                                 , { pattern = PatAll
@@ -990,8 +1589,8 @@ compileListPatternAsPayload seed heads rest body =
                                 ]
                             }
                 in
-                { pattern = justRecord headPat (PatVar t0)
-                , body = body2
+                { pattern = justRecord headPat (PatVar t0B.name)
+                , body = body3
                 }
 
 
@@ -1213,14 +1812,31 @@ peelBoundList bind body emptyFb =
 
     else
         -- Reuse list case compiler on the bound list name.
-        compileListCaseOnVar 0 bind.listName bind.heads bind.rest body emptyFb
+        compileListCaseOnVar 0 (occupy bind.listName emptyScope) bind.listName bind.heads bind.rest body emptyFb
 
 
 {-| Match heads/rest against an already-bound list variable.
 Binders for heads and open rest live in `Just { first = …, rest = … }` patterns.
 -}
-compileListCaseOnVar : Int -> String -> Array Pattern -> Pattern -> Expr -> Expr -> Expr
-compileListCaseOnVar seed listName heads rest body fail =
+compileListCaseOnVar : Int -> Scope -> String -> Array Pattern -> Pattern -> Expr -> Expr -> Expr
+compileListCaseOnVar seed scope listName heads rest body fail =
+    let
+        headsBound =
+            bindPatternList heads scope
+
+        restBound =
+            bindPattern rest headsBound.scope
+
+        body2 =
+            body
+                |> renameExpr headsBound.subst
+                |> renameExpr restBound.subst
+    in
+    compileListCaseOnVarBound seed restBound.scope listName headsBound.patterns restBound.pattern body2 fail
+
+
+compileListCaseOnVarBound : Int -> Scope -> String -> Array Pattern -> Pattern -> Expr -> Expr -> Expr
+compileListCaseOnVarBound seed scope listName heads rest body fail =
     when Array.popFirst heads is
         Nothing ->
             fail
@@ -1253,17 +1869,17 @@ compileListCaseOnVar seed listName heads rest body fail =
                     PatList members ->
                         if Array.isEmpty members then
                             let
-                                tmp =
-                                    "er_" ++ String.fromInt seed
+                                tmpB =
+                                    bindName ("er_" ++ String.fromInt seed) scope
                             in
                             ExprCase
                                 { expression = popFirst (var listName)
                                 , cases =
                                     [ { pattern = nothingPat, body = fail }
-                                    , { pattern = justRecord headPat (PatVar tmp)
+                                    , { pattern = justRecord headPat (PatVar tmpB.name)
                                       , body =
                                             ExprCase
-                                                { expression = popFirst (var tmp)
+                                                { expression = popFirst (var tmpB.name)
                                                 , cases =
                                                     [ { pattern = nothingPat, body = body }
                                                     , { pattern = PatAll, body = fail }
@@ -1281,16 +1897,16 @@ compileListCaseOnVar seed listName heads rest body fail =
 
             else
                 let
-                    tmp =
-                        "lt_" ++ String.fromInt seed
+                    tmpB =
+                        bindName ("lt_" ++ String.fromInt seed) scope
                 in
                 ExprCase
                     { expression = popFirst (var listName)
                     , cases =
                         [ { pattern = nothingPat, body = fail }
-                        , { pattern = justRecord headPat (PatVar tmp)
+                        , { pattern = justRecord headPat (PatVar tmpB.name)
                           , body =
-                                compileListCaseOnVar (seed + 1) tmp more rest body fail
+                                compileListCaseOnVarBound (seed + 1) tmpB.scope tmpB.name more rest body fail
                           }
                         ]
                     }
@@ -1493,8 +2109,22 @@ rewriteConsArgs seed arguments body =
                             listName =
                                 "al_" ++ String.fromInt seed ++ "_" ++ String.fromInt index
 
+                            -- Occupy prior arg binders so peels cannot shadow them.
+                            scope0 =
+                                Array.foldl
+                                    (\p s -> occupyAll (patternBinders p) s)
+                                    emptyScope
+                                    current.arguments
+                                    |> occupy listName
+
                             peeled =
-                                compileListCaseOnVar 0 listName heads rest current.expression (todo "elm-to-gren: arg list mismatch")
+                                compileListCaseOnVar 0
+                                    scope0
+                                    listName
+                                    heads
+                                    rest
+                                    current.expression
+                                    (todo "elm-to-gren: arg list mismatch")
                         in
                         { arguments = Array.pushLast (PatVar listName) current.arguments
                         , expression = peeled

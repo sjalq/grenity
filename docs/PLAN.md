@@ -254,7 +254,7 @@ no compiler in the loop.
       fixtures the test asserts the property FAILS (proof-of-red recorded in the
       changelog line); for all others it asserts equivalence. W2.1/W2.2 flip their
       entries to direct assertions as their done-condition. Prove: tier 0.
-- [ ] W1.3 [M2] Extend the property to `RecordAlias` and `CtorLaw`
+- [x] W1.3 [M2] Extend the property to `RecordAlias` and `CtorLaw`
       (`eval ∘ transform == eval` under the declaration-aware value normalization from
       W1.1). D20 closes when MatchCompile, CtorLaw, RecordAlias are all under the
       property. Prove: tier 0.
@@ -476,10 +476,13 @@ DONE = M5.G and M6.G pass on the same clean commit.
 
 ## STATUS
 
-- Active milestone: **M2**. Next task: **W1.3** (W2.1/W2.2, W3.6, W5.2 delegated, in flight).
+- Active milestone: **M2**. Next task: harvest **W3.6** (done in worktree), then W2.x, W5.2.
 - 2026-07-17 M1.G PASSED: tier 0 = 154 checks 0.70s; tier 1 = canary 14/14 30.5s +
   rule 4.1s + format 2.2s (~37s total); knownMiscompiles registered and red (D3/D4
   fixtures assert divergence).
+- 2026-07-17 W1.3: TransformLawTest landed — 120 RecordAlias + 120 CtorLaw seeded
+  samples (saturated/partial/piped ctor uses, field access), eval∘transform == eval
+  including a became-stuck guard; coverage floors pass. Tier 0 green (158 checks).
 - 2026-07-17 tier-0 wall measured: 0.70s warm (`npm test`, 154 checks incl. 240
   property samples); bare runner 0.16s.
 - 2026-07-17: Plan created from full-project audit (§6), adversarially reviewed

@@ -1,0 +1,441 @@
+module Ast.TransformLawTest exposing ( tests )
+
+{-| W1.3: `eval ∘ transform == eval` for RecordAlias and CtorLaw.
+
+Generated files use alias ctors and multi-arg ctors the ways Elm programs can
+(saturated, partially applied via let, passed through application chains,
+fields accessed) — expressions only, since Elm forbids alias ctors in
+patterns. Both sides evaluate under their own file's declaration tables;
+Ast.Eval's canonical value universe makes a correct transform value-identity.
+
+MatchCompile's case-expression property lives in Ast.EvalPropTest; together
+they put all three semantic transforms under the evaluator law (closes D20's
+"unguarded" status as the properties grow with fixes).
+-}
+
+import Array exposing ( Array )
+import Ast.CtorLaw as CtorLaw
+import Ast.Eval as Eval exposing ( Outcome(..) )
+import Ast.RecordAlias as RecordAlias
+import Ast.Types exposing
+    ( Declaration(..)
+    , Expr(..)
+    , File
+    , LetDecl(..)
+    , Pattern(..)
+    , TypeAnn(..)
+    )
+import Dict
+import Math
+import Maybe exposing ( Maybe(..) )
+
+
+type alias Check =
+    { name : String
+    , passed : Bool
+    , details : String
+    }
+
+
+tests : Array Check
+tests =
+    [ propertyCheck "RecordAlias equivalence"
+        aliasSampleCount
+        runAliasSeed
+    , propertyCheck "CtorLaw equivalence"
+        ctorSampleCount
+        runCtorSeed
+    ]
+        |> Array.flatten
+
+
+aliasSampleCount : Int
+aliasSampleCount =
+    120
+
+
+ctorSampleCount : Int
+ctorSampleCount =
+    120
+
+
+propertyCheck : String -> Int -> (Int -> SeedOutcome) -> Array Check
+propertyCheck name count runner =
+    let
+        outcomes =
+            Array.map runner (Array.range 0 (count - 1))
+
+        failures =
+            Array.mapAndKeepJust
+                (\o ->
+                    when o is
+                        Failed detail ->
+                            Just detail
+
+                        _ ->
+                            Nothing
+                )
+                outcomes
+
+        agreed =
+            Array.length (Array.keepIf (\o -> o == Agreed) outcomes)
+    in
+    [ { name = name
+      , passed = Array.isEmpty failures
+      , details =
+            when Array.first failures is
+                Just detail ->
+                    detail
+
+                Nothing ->
+                    ""
+      }
+    , { name = name ++ ": coverage (most samples decide)"
+      , passed = agreed * 2 >= count
+      , details =
+            "agreed " ++ String.fromInt agreed ++ " of " ++ String.fromInt count
+      }
+    ]
+
+
+type SeedOutcome
+    = Agreed
+    | Discarded
+    | Failed String
+
+
+compareTransformed : (File -> File) -> File -> Int -> SeedOutcome
+compareTransformed transform file index =
+    let
+        after =
+            transform file
+    in
+    when { pre = targetOutcome file, post = targetOutcome after } is
+        { pre = Just (Done a), post = Just (Done b) } ->
+            when Eval.valueEq a b is
+                Just True ->
+                    Agreed
+
+                Just False ->
+                    Failed ("seed " ++ String.fromInt index ++ ": value mismatch")
+
+                Nothing ->
+                    Discarded
+
+        { pre = Just (Crashed _), post = Just (Crashed _) } ->
+            Agreed
+
+        { pre = Just (Done _), post = Just (Crashed m) } ->
+            Failed ("seed " ++ String.fromInt index ++ ": introduced crash: " ++ m)
+
+        { pre = Just (Crashed _), post = Just (Done _) } ->
+            Failed ("seed " ++ String.fromInt index ++ ": removed crash")
+
+        { pre = Just (Done _), post = Just (Stuck reason) } ->
+            -- a transform must not turn a decidable program undecidable
+            Failed ("seed " ++ String.fromInt index ++ ": became stuck: " ++ reason)
+
+        _ ->
+            Discarded
+
+
+targetOutcome : File -> Maybe Outcome
+targetOutcome file =
+    file.declarations
+        |> Array.mapAndKeepJust
+            (\declaration ->
+                when declaration is
+                    DeclFunction fn ->
+                        if fn.name == "target" then
+                            Just fn.expression
+
+                        else
+                            Nothing
+
+                    _ ->
+                        Nothing
+            )
+        |> Array.first
+        |> Maybe.map (Eval.run (Eval.contextFromFile file) 20000)
+
+
+
+-- RECORD ALIAS PROPERTY -------------------------------------------------------
+
+
+runAliasSeed : Int -> SeedOutcome
+runAliasSeed index =
+    let
+        gen0 =
+            mix (index + 7000)
+
+        fieldCountPick =
+            range 2 3 gen0
+
+        fieldNames =
+            Array.map
+                (\i -> "f" ++ String.fromInt i)
+                (Array.range 0 (fieldCountPick.value - 1))
+
+        argsPick =
+            genArgs fieldCountPick.value fieldCountPick.gen
+
+        shapePick =
+            range 0 2 argsPick.gen
+
+        body =
+            aliasUseBody shapePick.value fieldNames argsPick.value
+
+        file =
+            buildFileWith
+                [ DeclAlias
+                    { name = "P"
+                    , documentation = Nothing
+                    , generics = []
+                    , typeAnnotation =
+                        TypeRecord
+                            (Array.map
+                                (\n ->
+                                    { name = n
+                                    , typeAnnotation = TypeGeneric "a"
+                                    }
+                                )
+                                fieldNames
+                            )
+                    }
+                ]
+                body
+    in
+    compareTransformed
+        (\f -> RecordAlias.apply (RecordAlias.collectFromFile f) f)
+        file
+        index
+
+
+aliasUseBody : Int -> Array String -> Array Expr -> Expr
+aliasUseBody shape fieldNames args =
+    when shape is
+        0 ->
+            -- saturated
+            ExprApplication (Array.pushFirst (bare "P") args)
+
+        1 ->
+            -- partial via let, then finish applying
+            when Array.popFirst args is
+                Just { first = firstArg, rest = restArgs } ->
+                    ExprLet
+                        { declarations =
+                            [ LetFunction
+                                { name = "partial"
+                                , arguments = []
+                                , expression =
+                                    ExprApplication [ bare "P", firstArg ]
+                                }
+                            ]
+                        , expression =
+                            ExprApplication
+                                (Array.pushFirst (bare "partial") restArgs)
+                        }
+
+                Nothing ->
+                    ExprApplication (Array.pushFirst (bare "P") args)
+
+        _ ->
+            -- saturated, then access a field
+            ExprAccess
+                { record = ExprApplication (Array.pushFirst (bare "P") args)
+                , field =
+                    Array.first fieldNames
+                        |> Maybe.withDefault "f0"
+                }
+
+
+
+-- CTOR LAW PROPERTY -----------------------------------------------------------
+
+
+runCtorSeed : Int -> SeedOutcome
+runCtorSeed index =
+    let
+        gen0 =
+            mix (index + 9000)
+
+        arityPick =
+            range 2 3 gen0
+
+        argsPick =
+            genArgs arityPick.value arityPick.gen
+
+        shapePick =
+            range 0 2 argsPick.gen
+
+        body =
+            ctorUseBody shapePick.value argsPick.value
+
+        file =
+            buildFileWith
+                [ DeclCustomType
+                    { name = "T"
+                    , documentation = Nothing
+                    , generics = []
+                    , constructors =
+                        [ { name = "K0", arguments = [] }
+                        , { name = "K"
+                          , arguments =
+                                Array.map (\_ -> TypeGeneric "a")
+                                    (Array.range 0 (arityPick.value - 1))
+                          }
+                        ]
+                    }
+                ]
+                body
+    in
+    compareTransformed
+        (\f -> CtorLaw.apply (CtorLaw.collectFromFile f) f)
+        file
+        index
+
+
+ctorUseBody : Int -> Array Expr -> Expr
+ctorUseBody shape args =
+    when shape is
+        0 ->
+            -- saturated
+            ExprApplication (Array.pushFirst (bare "K") args)
+
+        1 ->
+            -- curried through a let binding
+            when Array.popFirst args is
+                Just { first = firstArg, rest = restArgs } ->
+                    ExprLet
+                        { declarations =
+                            [ LetFunction
+                                { name = "make"
+                                , arguments = []
+                                , expression =
+                                    ExprApplication [ bare "K", firstArg ]
+                                }
+                            ]
+                        , expression =
+                            ExprApplication
+                                (Array.pushFirst (bare "make") restArgs)
+                        }
+
+                Nothing ->
+                    ExprApplication (Array.pushFirst (bare "K") args)
+
+        _ ->
+            -- bare ctor saturated one arg at a time through |>
+            -- (a |> K, then b |> (a |> K), …)
+            Array.foldl
+                (\arg acc ->
+                    ExprBinop { operator = "|>", left = arg, right = acc }
+                )
+                (bare "K")
+                args
+
+
+
+-- GENERATOR PRIMITIVES --------------------------------------------------------
+
+
+type alias Gen =
+    { seed : Int }
+
+
+mix : Int -> Gen
+mix index =
+    { seed = stepSeed (stepSeed (index * 2654435761 + 0x9E3779B9)) }
+
+
+stepSeed : Int -> Int
+stepSeed seed =
+    Math.modBy 2147483647 (seed * 1103515245 + 12345)
+
+
+range : Int -> Int -> Gen -> { gen : Gen, value : Int }
+range low high gen =
+    let
+        seed =
+            stepSeed gen.seed
+
+        span =
+            high - low + 1
+    in
+    { gen = { seed = seed }
+    , value = low + Math.modBy span seed
+    }
+
+
+genArgs : Int -> Gen -> { gen : Gen, value : Array Expr }
+genArgs count gen0 =
+    Array.foldl
+        (\_ acc ->
+            let
+                kindPick =
+                    range 0 2 acc.gen
+            in
+            when kindPick.value is
+                0 ->
+                    let
+                        intPick =
+                            range 0 9 kindPick.gen
+                    in
+                    { gen = intPick.gen
+                    , value =
+                        Array.pushLast (ExprInt intPick.value) acc.value
+                    }
+
+                1 ->
+                    { gen = kindPick.gen
+                    , value =
+                        Array.pushLast (ExprString "s") acc.value
+                    }
+
+                _ ->
+                    let
+                        itemPick =
+                            range 0 9 kindPick.gen
+                    in
+                    { gen = itemPick.gen
+                    , value =
+                        Array.pushLast
+                            (ExprList [ ExprInt itemPick.value ])
+                            acc.value
+                    }
+        )
+        { gen = gen0, value = [] }
+        (Array.repeat count {})
+
+
+
+-- FILE ASSEMBLY ---------------------------------------------------------------
+
+
+buildFileWith : Array Declaration -> Expr -> File
+buildFileWith typeDecls targetBody =
+    { schemaVersion = 1
+    , moduleDefinition =
+        { kind = Ast.Types.NormalModule
+        , moduleName = "Gen"
+        , exposing_ = Ast.Types.ExposeAll
+        }
+    , comments = []
+    , imports = []
+    , declarations =
+        Array.pushLast
+            (DeclFunction
+                { name = "target"
+                , documentation = Nothing
+                , signature = Nothing
+                , arguments = []
+                , expression = targetBody
+                }
+            )
+            typeDecls
+    }
+
+
+bare : String -> Expr
+bare name =
+    ExprVar { moduleName = Nothing, name = name }

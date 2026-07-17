@@ -7,6 +7,7 @@ import Ast.EvalTest
 import Ast.PrintTest
 import Ast.ReservedTest
 import Ast.RecordAliasTest
+import Ast.TransformLawTest
 import Elm.ManifestTest
 import Elm.PackageNameTest
 import Elm.RegistryTest
@@ -84,6 +85,7 @@ allChecks =
     , Ast.PrintTest.tests
     , Ast.ReservedTest.tests
     , Ast.RecordAliasTest.tests
+    , Ast.TransformLawTest.tests
     , Mapping.Tests.checks
         |> Array.map
             (\check ->

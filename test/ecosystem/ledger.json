@@ -1,0 +1,3657 @@
+{
+  "schemaVersion": 1,
+  "role": "ecosystem-ledger",
+  "law": "Every walked package has a terminal state; every suite failure reconciles to a working-failure entry with evidence. STALE when entry.commit predates the last src/ change (see test/ecosystem/lib/ledger.cjs).",
+  "stateKey": {
+    "PASS": "Ported AND behaviorally verified: observed runtime behavior matches Elm.",
+    "PASS-compile-only": "Ported; gren compiles and `gren docs` verifies. Runtime behavior not asserted.",
+    "EXEMPT-kernel": "Out of scope: depends on Elm Kernel / effect-module native code.",
+    "EXEMPT-glsl": "Out of scope: uses WebGL/GLSL shaders the target does not support.",
+    "EXEMPT-broken-upstream": "Out of scope: the upstream Elm package is itself broken / unbuildable.",
+    "working-failure": "Reproduced, evidenced failure to port on the stamped commit (reason + evidence required)."
+  },
+  "seededFrom": "documented seed (pure 201/202, browser 246/252) at commit 0d0ce41 — no LAST_RUN.json proof present",
+  "snapshotCrossCheck": "all 454 suite packages present in registry snapshot (2055)",
+  "generatedAt": "2026-07-17T18:00:26.374Z",
+  "entries": [
+    {
+      "name": "0ui/elm-task-parallel",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "1602/json-value",
+      "version": "3.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "3kyro/xsrf-protection",
+      "version": "2.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "7hoenix/elm-chess",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Arkham/elm-rttl",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Bernardoow/elm-alert-timer-message",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Bernardoow/elm-rating-component",
+      "version": "2.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "BrianHicks/elm-particle",
+      "version": "1.5.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "BrianHicks/elm-trend",
+      "version": "2.1.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Chadtech/elm-bool-extra",
+      "version": "2.4.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Chadtech/elm-provider",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Chadtech/return",
+      "version": "1.0.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ChristophP/elm-i18next",
+      "version": "4.2.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ChristophP/elm-mark",
+      "version": "2.0.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Confidenceman02/elm-animate-height",
+      "version": "4.2.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ContaSystemer/elm-effects",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "EdutainmentLIVE/elm-dropdown",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "EngageSoftware/elm-mustache",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "FabienHenon/elm-ckeditor5",
+      "version": "1.4.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "FabienHenon/elm-infinite-list-view",
+      "version": "3.3.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "FabienHenon/elm-infinite-scroll",
+      "version": "3.0.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "FabienHenon/elm-placeholder-loading",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "FabienHenon/env",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "FordLabs/elm-star-rating",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Fresheyeball/elm-return",
+      "version": "7.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "FuJa0815/elm-ui",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Gipphe/elm-ui",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Gizra/elm-attribute-builder",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Gizra/elm-form",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Gizra/elm-storage-key",
+      "version": "1.1.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "GlobalWebIndex/class-namespaces",
+      "version": "3.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "GlobalWebIndex/quantify",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "GoldentTuft/elm-infinite-scroll",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Herteby/enum",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "IzumiSy/elm-typed",
+      "version": "4.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Janiczek/cmd-extra",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Janiczek/elm-list-cartesian",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Janiczek/elm-vlq",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Janiczek/transform",
+      "version": "1.1.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "JeremyBellows/elm-bootstrapify",
+      "version": "9.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "JoelQ/elm-toggleable",
+      "version": "1.1.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "JohanWinther/elm-pan-and-zoom",
+      "version": "3.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "JohnBugner/elm-matrix",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Juli4nG/elm-json-render",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "K-Adam/elm-dom",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Kurren123/k-dropdown-container",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "MackeyRMS/elm-ui",
+      "version": "2.0.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "MackeyRMS/string-util",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Massolari/elm-mask",
+      "version": "1.1.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Microsoft/elm-json-tree-view",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "NoRedInk/elm-compare",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "NoRedInk/elm-debug-controls-without-datepicker",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "NoRedInk/elm-json-decode-pipeline",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "NoRedInk/elm-rails",
+      "version": "9.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "NoRedInk/elm-random-general",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "NoRedInk/elm-simple-fuzzy",
+      "version": "1.0.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "NoRedInk/elm-sortable-table",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "NoRedInk/elm-string-conversions",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "NoRedInk/elm-sweet-poll",
+      "version": "6.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "NoRedInk/http-upgrade-shim",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Orasund/elm-bag",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Orasund/elm-game-ai-minimax",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Orasund/elm-jsonstore",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Orasund/elm-layout",
+      "version": "3.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Orasund/elm-svg-writer",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "PaackEng/elm-google-maps",
+      "version": "2.5.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Punie/elm-reader",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "Spaxe/svg-pathd",
+      "version": "3.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "SupercedeTech/elm-validation",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "SwiftsNamesake/proper-keyboard",
+      "version": "4.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "TSFoster/elm-bytes-extra",
+      "version": "1.3.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "TSFoster/elm-md5",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "TSFoster/elm-tuple-extra",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ThinkAlexandria/elm-drag-locations",
+      "version": "3.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ThinkAlexandria/elm-html-in-elm",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ThinkAlexandria/elm-primer-tooltips",
+      "version": "2.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "UbiqueLambda/elm-with-ui-backend",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "abinayasudhir/elm-treeview",
+      "version": "1.0.1",
+      "state": "working-failure",
+      "reason": "exit-1",
+      "evidence": "browser suite failure @ 0d0ce41 (exit-1)",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "abradley2/edn-parser",
+      "version": "2.2.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "abradley2/elm-game-logic",
+      "version": "1.2.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "abymosa/elm-debounce",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "adauguet/elm-pbkdf2",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "adauguet/elm-spanned-string",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "afidegnum/elm-bulmanizer",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "agustinrhcp/elm-mask",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ahstro/elm-bulma-classes",
+      "version": "4.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ahstro/elm-luhn",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "akheron/elm-easter",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "alex-tan/elm-tree-diagram",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "alex-tan/loadable",
+      "version": "3.1.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "alex-tan/postgrest-client",
+      "version": "3.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "alex-tan/postgrest-queries",
+      "version": "7.2.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "alex-tan/task-extra",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "alexanderkiel/list-selection",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "alexandrepiveteau/elm-gap-buffer",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "aliankarali/elm-select",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "allo-media/canopy",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "allo-media/elm-es-simple-query-string",
+      "version": "4.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "alma/elm-sms-length",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "altjsus/elmtable",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "andimclean/elm-ui",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "andre-dietrich/elm-conditional",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "andre-dietrich/elm-mapbox",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "andre-dietrich/elm-url-extension",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "andreasewering/intl-proxy",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "andrewMacmurray/elm-delay",
+      "version": "4.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "andrewMacmurray/elm-simple-animation",
+      "version": "2.3.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "andrewMacmurray/elm-url-query-pipeline",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "andys8/elm-geohash",
+      "version": "1.1.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "anmolitor/intl-proxy",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "annaghi/dnd-list",
+      "version": "6.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "arowM/elm-css-modules-helper",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "arowM/elm-data-url",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "arowM/elm-decimal-char",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "arowM/elm-form-validator",
+      "version": "2.1.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "arowM/elm-html-internal",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "arowM/elm-html-with-context",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "arowM/elm-init-builder",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "arowM/elm-markdown-ast",
+      "version": "1.0.6",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "arowM/elm-mixin",
+      "version": "4.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "arowM/elm-multiline-string",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "arowM/elm-parser-test",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "arowM/elm-reference",
+      "version": "1.0.7",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "arowM/elm-sequence-id",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "arturopala/elm-monocle",
+      "version": "2.2.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "asgr-dk/elm-msg-replay",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "atzzCokeK/elm-inputtext-with-count",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "austinshenk/elm-w3",
+      "version": "4.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "avh4/elm-color",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "b0oh/elm-do",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "banky/elm-style-animation",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "bburdette/httpjsontask",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "bburdette/pdf-element",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "bburdette/toop",
+      "version": "1.2.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "bellroy/elm-actor-framework",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "bellroy/elm-actor-framework-template",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "bellroy/elm-embed-youtube",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "bellroy/elm-infinite-gallery",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "benjajaja/radar-chart",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "bigbinary/elm-form-field",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "bigbinary/elm-reader",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "billstclair/elm-css",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "billstclair/elm-dialog",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "billstclair/elm-popup-picker",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "billstclair/elm-sortable-table",
+      "version": "1.2.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "billstclair/elm-svg-button",
+      "version": "4.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "bitsoflogic/elm-radixint",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "boianr/multilingual",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "bonzaico/murmur3",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "brainrake/elm-mathml",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "capitalist/elm-octicons",
+      "version": "2.3.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "caribou-oss/elm-popper",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ccapndave/elm-flat-map",
+      "version": "1.2.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ccapndave/elm-translator",
+      "version": "2.2.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ccapndave/elm-update-extra",
+      "version": "4.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ccapndave/focus",
+      "version": "3.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ceddlyburge/dnd-list",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "cedricss/elm-progress-ring",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "cekrem/elm-form",
+      "version": "1.1.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "cekrem/html-helpers",
+      "version": "2.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "chelovek0v/bbase64",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "chemirea/bulma-classes",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "choonkeat/elm-ext-http",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "choonkeat/html-data",
+      "version": "4.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "cultureamp/elm-css-modules-loader",
+      "version": "2.0.10",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "curtissimo/elm-inertial-scroll-detection",
+      "version": "3.1.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "curtissimo/elm-native-modal-dialog",
+      "version": "3.0.1",
+      "state": "working-failure",
+      "reason": "type-mismatch",
+      "evidence": "browser suite failure @ 0d0ce41 (type-mismatch)",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "danfishgold/base64-bytes",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "danhandrea/elm-router",
+      "version": "4.3.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "danhandrea/elm-time-extra",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "danyx23/elm-mimetype",
+      "version": "4.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "danyx23/elm-uuid",
+      "version": "2.1.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "debois/elm-dom",
+      "version": "1.3.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "dillonkearns/elm-xml-encode",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "dividat/elm-semver",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "dmy/elm-pratt-parser",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "doanythingfordethklok/snackbar",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "dosarf/elm-yet-another-polling",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "driebit/elm-swipe-events",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "dwayne/elm-json-rpc",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "dwayne/elm-validation",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "dwyl/elm-criteria",
+      "version": "2.2.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "edkelly303/elm-nested-tuples",
+      "version": "1.0.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "edkv/elm-generic-dict",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "eldesh/alt-core-elm",
+      "version": "1.2.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-cardano/base64",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-cardano/float16",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-cardano/x-bytes",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-community/array-extra",
+      "version": "2.6.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-community/basics-extra",
+      "version": "4.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-community/dict-extra",
+      "version": "2.4.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-community/easing-functions",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-community/html-extra",
+      "version": "3.4.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-community/intdict",
+      "version": "3.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-community/list-extra",
+      "version": "8.7.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-community/list-split",
+      "version": "1.0.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-community/maybe-extra",
+      "version": "5.3.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-community/random-extra",
+      "version": "3.2.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-community/result-extra",
+      "version": "2.4.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-community/undo-redo",
+      "version": "3.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-i18n/translatable-html",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "elm-toulouse/float16",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "emilianobovetti/elm-toast",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "emptyflash/typed-svg",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "enbala/elm-form",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ericgj/elm-bem",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "eriktim/elm-protocol-buffers",
+      "version": "1.2.0",
+      "state": "working-failure",
+      "reason": "exit-1",
+      "evidence": "browser suite failure @ 0d0ce41 (exit-1)",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "escherlies/elm-vectors",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "etaque/elm-response",
+      "version": "3.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "etaque/elm-transit",
+      "version": "7.0.5",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "evancz/elm-playground",
+      "version": "1.0.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "fabiommendes/elm-request",
+      "version": "4.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "fabiommendes/elm-roman",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "fapian/elm-html-aria",
+      "version": "1.4.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "feathericons/elm-feather",
+      "version": "1.5.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "fedragon/elm-typed-dropdown",
+      "version": "2.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "folkertdev/elm-deque",
+      "version": "3.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "folkertdev/elm-state",
+      "version": "3.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "frandibar/elm-font-awesome-5",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "fredcy/elm-debouncer",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "fredcy/elm-parseint",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "fysiweb/elm-gallery",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "gampleman/elm-mapbox",
+      "version": "4.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "garados007/triple",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "genthaler/elm-enum",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "georgesboris/elm-attributes",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "getto-systems/elm-html-table",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "getto-systems/elm-url",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ggb/numeral-elm",
+      "version": "1.5.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ghivert/elm-graphql",
+      "version": "5.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "gipsy-king/radar-chart",
+      "version": "3.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "gregziegan/elm-font-awesome-5",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "gribouille/elm-bulma",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "gribouille/elm-combo",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "gribouille/elm-graphql",
+      "version": "2.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "gribouille/elm-multiselect",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "gribouille/elm-select-tailwind",
+      "version": "1.2.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "gribouille/elm-spinner",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "gribouille/elm-treeview",
+      "version": "2.0.2",
+      "state": "working-failure",
+      "reason": "exit-1",
+      "evidence": "browser suite failure @ 0d0ce41 (exit-1)",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "groma84/elm-tachyons",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "grotsev/elm-debouncer",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "hallelujahdrive/elm-accordion",
+      "version": "1.0.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "hallelujahdrive/elm-croppie",
+      "version": "1.0.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "hanifhefaz/elm-tf-idf",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "hanifhefaz/elm-word-search",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "hanifhefaz/elm-word2dict-matcher",
+      "version": "5.1.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "harmboschloo/elm-dict-intersect",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "harmboschloo/graphql-to-elm-package",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "harrysarson/elm-hacky-unique",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "hayleigh-dot-dev/elm-limiter",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "hayleigh-dot-dev/elm-lustre-ui",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "henriquecbuss/elm-eos",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "hercules-ci/elm-hercules-extras",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "hrldcpr/elm-cons",
+      "version": "3.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "humio/elm-dashboard",
+      "version": "6.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ianmackenzie/elm-1d-parameter",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ianmackenzie/elm-float-extra",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ianmackenzie/elm-units",
+      "version": "2.10.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "insurello/elm-swedish-bank-account-number",
+      "version": "2.0.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "insurello/elm-ui",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "iodevs/elm-validate",
+      "version": "3.0.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ir4y/elm-dnd",
+      "version": "3.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "j-maas/elm-ordered-containers",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "j-panasiuk/elm-ionicons",
+      "version": "2.0.0",
+      "state": "working-failure",
+      "reason": "timeout",
+      "evidence": "browser suite failure @ 0d0ce41 (timeout)",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jackfranklin/elm-parse-link-header",
+      "version": "2.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "janjelinek/creditcard-validation",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jaredramirez/elm-field",
+      "version": "1.1.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jfmengels/elm-review",
+      "version": "2.16.6",
+      "state": "working-failure",
+      "reason": "type-mismatch",
+      "evidence": "pure suite failure @ 0d0ce41 (type-mismatch)",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jinjor/elm-contextmenu",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jinjor/elm-debounce",
+      "version": "3.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jinjor/elm-diff",
+      "version": "1.0.6",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jinjor/elm-map-debug",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jinjor/elm-req",
+      "version": "3.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jjagielka/select-menu",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jjant/elm-fps",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jluckyiv/elm-utc-date-strings",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jonathanfishbein1/elm-semigroup",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "joneshf/elm-tagged",
+      "version": "2.1.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jonoabroad/commatosed",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jorgengranseth/elm-string-format",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jouderianjr/elm-loaders",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jschomay/elm-bounded-number",
+      "version": "2.1.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jschomay/elm-narrative-engine",
+      "version": "6.0.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "json-tools/json-value",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jsuder-xx/seven-segment",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "justgage/tachyons-elm",
+      "version": "4.1.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "justgook/elm-webdriver",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "justinmimbs/date",
+      "version": "4.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jweir/elm-iso8601",
+      "version": "7.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jweir/sparkline",
+      "version": "4.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jxxcarlson/elm-graph",
+      "version": "3.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jxxcarlson/markdown-to-scripta",
+      "version": "1.0.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "jzxhuang/http-extras",
+      "version": "2.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "kikytokamuro/elm-linerbar",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "kingwither/elmeither",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "kirchner/elm-selectize",
+      "version": "2.0.7",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "kkazuo/expect-bytes",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "kkpoon/elm-auth0-urlparser",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "kkpoon/elm-echarts",
+      "version": "10.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "klazuka/elm-json-tree-view",
+      "version": "2.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "kmbn/elm-hotkeys",
+      "version": "1.1.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "kokizzu/elm-date-format",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "koskoci/elm-sortable-table",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "kress95/elm-html-convert",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "krisajenkins/remotedata",
+      "version": "6.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "kudzu-forest/elm-constant-time-queue",
+      "version": "1.4.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lambda-phi/disjoint-set",
+      "version": "3.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "larribas/elm-multi-input",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "laserpants/elm-burrito-update",
+      "version": "3.0.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "laurentpayot/minidenticons-elm",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lazamar/dict-parser",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lemol/ant-design-icons-elm",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lettenj61/elm-reusable-html",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lgcantarelli/emusic",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lionar/select",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ljuglaret/fraction",
+      "version": "2.0.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lobanov/elm-taskport",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lovasoa/elm-rolling-list",
+      "version": "1.1.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lue-bird/elm-allowable-state",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lue-bird/elm-and-or",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lue-bird/elm-no-record-type-alias-constructor-function",
+      "version": "1.0.8",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lue-bird/elm-partial-or-complete",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lue-bird/elm-typed-value",
+      "version": "8.2.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lukewestby/elm-http-builder",
+      "version": "8.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lukewestby/elm-string-interpolate",
+      "version": "1.0.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lukewestby/elm-template",
+      "version": "3.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lydell/elm-app-url",
+      "version": "1.0.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "lynn/elm-arithmetic",
+      "version": "3.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "malinoff/elm-uniform",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "marshallformula/arrangeable-list",
+      "version": "1.1.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "marshallformula/elm-swiper",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "martouta/elm-emojis-converter",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "martouta/html-key-events",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "massung/elm-css",
+      "version": "1.1.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "mauroc8/elm-html-pipeline",
+      "version": "3.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "mdgriffith/elm-style-animation",
+      "version": "4.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "mdgriffith/elm-ui",
+      "version": "1.1.8",
+      "state": "working-failure",
+      "reason": "exit-1",
+      "evidence": "browser suite failure @ 0d0ce41 (exit-1)",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "mercurymedia/elm-message-toast",
+      "version": "3.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "mgold/elm-geojson",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "mgold/elm-nonempty-list",
+      "version": "4.2.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "mhoare/elm-stack",
+      "version": "3.1.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "micahhahn/elm-safe-recursion",
+      "version": "2.2.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "miniBill/elm-codec",
+      "version": "2.3.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "miniBill/elm-fast-dict",
+      "version": "1.2.6",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "miyamoen/select-list",
+      "version": "4.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "miyamoen/tree-with-zipper",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "mpizenberg/elm-file",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "mpizenberg/elm-placeholder-pkg",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "nibrivia/animator",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "noordstar/elm-matrix-webhooks",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "norpan/elm-html5-drag-drop",
+      "version": "3.1.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ohanhi/autoexpand",
+      "version": "3.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ohanhi/keyboard",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ohanhi/lorem",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ozmat/elm-validation",
+      "version": "2.2.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "pablohirafuji/elm-markdown",
+      "version": "2.0.6",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "pablohirafuji/elm-syntax-highlight",
+      "version": "3.7.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "panthershark/snackbar",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "paul-freeman/elm-ipfs",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "pd9333/elm-time2",
+      "version": "2.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "pdamoc/elm-hashids",
+      "version": "1.0.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "periodic/elm-csv",
+      "version": "2.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "peterszerzo/elm-json-tree-view",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "pilatch/flip",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "prikhi/http-tasks",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "proberge-dev/browser-keyboard",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "proberge-dev/elm-grid",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "proda-ai/elm-dropzone",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "proda-ai/formatting",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "proda-ai/murmur3",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "prozacchiwawa/elm-urlbase64",
+      "version": "1.0.6",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "pzp1997/assoc-list",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ralphtq/elm-rdf-n3-quads",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "red-g/filter",
+      "version": "2.0.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "red-g/sort",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "renanpvaz/elm-bem",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rgrempel/elm-http-decorators",
+      "version": "3.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rielas/measurement",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rjbma/elm-listview",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rl-king/elm-inview",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rl-king/elm-iso3166-country-codes",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rl-king/elm-masonry",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rluiten/sparsevector",
+      "version": "1.0.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rluiten/stemmer",
+      "version": "1.0.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rluiten/stringdistance",
+      "version": "1.0.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rluiten/trie",
+      "version": "2.1.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "robinheghan/fnv1a",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "robinheghan/murmur3",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "robotmay/s3-direct-file-upload",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rsignavong/elm-cloudinary-video-player",
+      "version": "1.0.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rsignavong/elm-leaflet-map",
+      "version": "4.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rtfeldman/console-print",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rtfeldman/elm-hex",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rtfeldman/elm-iso8601-date-strings",
+      "version": "1.1.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "rtfeldman/elm-validate",
+      "version": "4.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ryan-haskell/date-format",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ryan-haskell/graphql",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ryan-senn/elm-compiler-error-sscce",
+      "version": "6.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "s6o/elm-recase",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "samhstn/time-format",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "samuelstevens/elm-csv",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "sashaafm/eetf",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "sh4r3m4n/elm-piano",
+      "version": "2.0.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "showell/binary-tree-diagram",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "showell/dict-dot-dot",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "simplystuart/elm-scroll-to",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "skovsboll/elm-crontab",
+      "version": "1.0.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "slashmili/phoenix-socket",
+      "version": "4.2.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "sli/autotable",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "sophiecollard/jsonpath",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "stephenreddek/elm-time-picker",
+      "version": "1.0.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "stil4m/elm-syntax",
+      "version": "7.3.9",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "stil4m/structured-writer",
+      "version": "1.0.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "stoeffel/editable",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "stoeffel/elm-verify",
+      "version": "5.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "stoeffel/resetable",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "stoeffel/set-extra",
+      "version": "1.2.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "tad-lispy/springs",
+      "version": "1.0.5",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "techbelly/elm-zmachine",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "terezka/elm-diff",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "tesk9/accessible-html",
+      "version": "6.2.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "thaterikperson/elm-strftime",
+      "version": "2.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "the-sett/decode-generic",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "the-sett/elm-animate",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "the-sett/elm-pretty-printer",
+      "version": "3.3.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "the-sett/elm-refine",
+      "version": "1.4.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "the-sett/elm-state-machines",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "the-sett/elm-string-case",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "the-sett/json-optional",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "tj/elm-svg-loaders",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "toastal/either",
+      "version": "3.6.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "toastal/endo",
+      "version": "1.1.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "tortus/elm-array-2d",
+      "version": "3.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "tremlab/bugsnag-elm",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "tripokey/elm-fuzzy",
+      "version": "5.2.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "truqu/elm-base64",
+      "version": "2.0.4",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "truqu/elm-dictset",
+      "version": "2.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "turboMaCk/any-dict",
+      "version": "3.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "turboMaCk/glue",
+      "version": "6.2.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "turboMaCk/non-empty-list-alias",
+      "version": "1.4.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "turboMaCk/queue",
+      "version": "1.2.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "uncover-co/elm-submodules",
+      "version": "1.1.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "uncover-co/elm-theme-provider",
+      "version": "2.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "ursi/elm-scroll",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "visotype/elm-dom",
+      "version": "1.1.3",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "w0rm/elm-slice-show",
+      "version": "6.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "wernerdegroot/listzipper",
+      "version": "4.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "whale9490/elm-split-pane",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "xdelph/elm-sortable-table",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "yotamDvir/elm-katex",
+      "version": "2.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "z5h/jaro-winkler",
+      "version": "1.0.2",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "zgohr/elm-csv",
+      "version": "1.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "zwilias/elm-bytes-parser",
+      "version": "1.0.0",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    },
+    {
+      "name": "zwilias/elm-utf-tools",
+      "version": "2.0.1",
+      "state": "PASS-compile-only",
+      "behavior": "compile-only",
+      "commit": "0d0ce41",
+      "date": "2026-07-15"
+    }
+  ]
+}

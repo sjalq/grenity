@@ -284,7 +284,7 @@ no compiler in the loop.
 - [ ] W2.5 [M2] D18: audit Reserved cross-module renames with a multi-module fixture;
       fix if real, else record "audited sound, fixture: <path>" here.
       Prove: tier 0 (fixture) + tier 1.
-- [ ] W5.2 [M2] Ledger + snapshot (numbered for history; lives in M2 by tag):
+- [x] W5.2 [M2] Ledger + snapshot (numbered for history; lives in M2 by tag):
       commit `test/ecosystem/registry-snapshot.json` (fetched from
       package.elm-lang.org/search.json, date + count recorded in §STATUS) and
       `test/ecosystem/ledger.json` seeded from current curated results; extend
@@ -476,7 +476,7 @@ DONE = M5.G and M6.G pass on the same clean commit.
 
 ## STATUS
 
-- Active milestone: **M2**. Next task: **W2.1** (delegated, in flight) then W2.2, W2.3.
+- Active milestone: **M2**. Next: harvest W2.x delegates; W2.4; then M2.G.
 - 2026-07-17 M1.G PASSED: tier 0 = 154 checks 0.70s; tier 1 = canary 14/14 30.5s +
   rule 4.1s + format 2.2s (~37s total); knownMiscompiles registered and red (D3/D4
   fixtures assert divergence).
@@ -487,6 +487,12 @@ DONE = M5.G and M6.G pass on the same clean commit.
   correct platform, ignores failure lists); vacuous --only/--reason filters now exit
   non-zero; unknown package exits non-zero; runs stay triage-only. (Delegate-implemented,
   validated here: vacuous filter EXIT=1, maybe-extra direct port EXIT=0.)
+- 2026-07-17 W5.2: registry-snapshot.json committed (2,055 packages, fetched
+  2026-07-17); ledger.json seeded (454 entries: 447 PASS-compile-only, 7
+  working-failure); ledger lib with STALE + reconciliation laws (19 unit checks,
+  npm run test:ledger); status.cjs prints LEDGER section. All seeded entries
+  currently STALE by law (stamped 0d0ce41, src/ changed since) — M2.G's tier-3
+  rerun reseeds. (Delegate-implemented, validated + merged here.)
 - 2026-07-17 tier-0 wall measured: 0.70s warm (`npm test`, 154 checks incl. 240
   property samples); bare runner 0.16s.
 - 2026-07-17: Plan created from full-project audit (§6), adversarially reviewed

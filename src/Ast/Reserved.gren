@@ -1,4 +1,4 @@
-module Ast.Reserved exposing ( apply, rewriteName )
+module Ast.Reserved exposing ( apply, exportRenames, rewriteName )
 
 {-| Rename identifiers that are keywords in Gren but ordinary names in Elm.
 
@@ -9,6 +9,16 @@ pre-escape params that way; Elm already forbids shadowing).
 **Record fields:** always the fixed escape `when` → `when_`. Fields are a
 separate namespace from values, and must match across modules (Internals vs
 callers) — occupancy-based field renames would desync payloads.
+
+**Cross-module references:** the occupancy escape is per-module, so module `A`
+may rename its exported `when` to `when__` (because `A` also binds `when_`)
+while a caller `B` that lacks `when_` would pick `when_`. Resolving a
+qualified/exposing-imported reference with the *caller's* map desyncs the call
+(`B` emits `A.when_` / `import A exposing (when_)` but `A` exposes `when__`).
+So references with a resolved module name (both `A.when` and unqualified
+`when` imported from `A`, which the extractor resolves to `A`) and import
+`exposing` lists are rewritten from the package-wide export map — the
+*defining* module's decision — not the local occupancy map.
 -}
 
 import Array exposing ( Array )
@@ -37,19 +47,51 @@ type alias RenameMap =
     Dict String String
 
 
-apply : File -> File
-apply file =
+{-| Rewrite context: `local` is this module's occupancy escape (own binders,
+own exposing, own decl names); `package` is the package-wide export map,
+keyed `"Module.name"`, holding every module's own reserved-export decisions so
+cross-module references resolve to the *defining* module's escaped name.
+-}
+type alias Ctx =
+    { package : Dict String String
+    , local : RenameMap
+    }
+
+
+apply : Dict String String -> File -> File
+apply packageExports file =
     let
         renames =
             buildRenameMap (collectOccupied file)
+
+        ctx =
+            { package = packageExports, local = renames }
     in
     { file
         | moduleDefinition = rewriteModuleDef renames file.moduleDefinition
-        , imports = Array.map (rewriteImport renames) file.imports
+        , imports = Array.map (rewriteImport ctx) file.imports
         , declarations =
-              Array.map (rewriteDeclaration renames) file.declarations
+              Array.map (rewriteDeclaration ctx) file.declarations
         , comments = Array.map (rewriteDocsComment renames) file.comments
     }
+
+
+{-| This module's reserved-word export decisions, keyed `"Module.name"`, for
+the package-wide map that keeps cross-module qualified references in sync.
+Computed with the exact occupancy `apply` uses, so a module's own package
+entry equals its local escape.
+-}
+exportRenames : File -> Dict String String
+exportRenames file =
+    let
+        moduleName =
+            file.moduleDefinition.moduleName
+    in
+    Dict.foldl
+        (\reserved escaped acc ->
+            Dict.set (moduleName ++ "." ++ reserved) escaped acc)
+        Dict.empty
+        (buildRenameMap (collectOccupied file))
 
 
 {-| Public helper: naive single underscore escape (no occupancy). Prefer `apply`
@@ -424,12 +466,55 @@ rewriteModuleDef renames moduleDef =
     { moduleDef | exposing_ = rewriteExposing renames moduleDef.exposing_ }
 
 
-rewriteImport : RenameMap -> Import -> Import
-rewriteImport renames import_ =
+rewriteImport : Ctx -> Import -> Import
+rewriteImport ctx import_ =
     { import_
-        | alias = Maybe.map (rewriteWith renames) import_.alias
-        , exposing_ = Maybe.map (rewriteExposing renames) import_.exposing_
+        | alias = Maybe.map (rewriteWith ctx.local) import_.alias
+        , exposing_ =
+              Maybe.map (rewriteImportExposing ctx.package import_.moduleName)
+                  import_.exposing_
     }
+
+
+{-| An `import A exposing (when)` names A's *exports*, so it must follow A's
+own escape decision (from the package map), not the caller's occupancy map.
+-}
+rewriteImportExposing : Dict String String -> String -> Exposing -> Exposing
+rewriteImportExposing packageExports moduleName exposing_ =
+    when exposing_ is
+        ExposeAll ->
+            ExposeAll
+
+        ExposeExplicit items ->
+            ExposeExplicit
+                (Array.map (rewriteImportExposedItem packageExports moduleName)
+                    items)
+
+
+rewriteImportExposedItem :
+    Dict String String -> String -> ExposedItem -> ExposedItem
+rewriteImportExposedItem packageExports moduleName item =
+    let
+        resolve name =
+            when Dict.get (moduleName ++ "." ++ name) packageExports is
+                Just escaped ->
+                    escaped
+
+                Nothing ->
+                    name
+    in
+    when item is
+        ExposeInfix name ->
+            ExposeInfix name
+
+        ExposeFunction name ->
+            ExposeFunction (resolve name)
+
+        ExposeTypeOrAlias name ->
+            ExposeTypeOrAlias (resolve name)
+
+        ExposeType { name = name, open = open } ->
+            ExposeType { name = resolve name, open = open }
 
 
 rewriteExposing : RenameMap -> Exposing -> Exposing
@@ -458,122 +543,122 @@ rewriteExposedItem renames item =
             ExposeType { name = rewriteWith renames name, open = open }
 
 
-rewriteDeclaration : RenameMap -> Declaration -> Declaration
-rewriteDeclaration renames declaration =
+rewriteDeclaration : Ctx -> Declaration -> Declaration
+rewriteDeclaration ctx declaration =
     when declaration is
         DeclFunction fn ->
             DeclFunction
                 { fn
-                    | name = rewriteWith renames fn.name
+                    | name = rewriteWith ctx.local fn.name
                     , signature =
-                          Maybe.map (rewriteSignature renames) fn.signature
+                          Maybe.map (rewriteSignature ctx) fn.signature
                     , arguments =
-                          Array.map (rewritePattern renames) fn.arguments
-                    , expression = rewriteExpr renames fn.expression
+                          Array.map (rewritePattern ctx) fn.arguments
+                    , expression = rewriteExpr ctx fn.expression
                 }
 
         DeclAlias aliasDecl ->
             DeclAlias
                 { aliasDecl
-                    | name = rewriteWith renames aliasDecl.name
+                    | name = rewriteWith ctx.local aliasDecl.name
                     , generics =
-                          Array.map (rewriteWith renames) aliasDecl.generics
+                          Array.map (rewriteWith ctx.local) aliasDecl.generics
                     , typeAnnotation =
-                          rewriteType renames aliasDecl.typeAnnotation
+                          rewriteType ctx aliasDecl.typeAnnotation
                 }
 
         DeclCustomType custom ->
             DeclCustomType
                 { custom
-                    | name = rewriteWith renames custom.name
-                    , generics = Array.map (rewriteWith renames) custom.generics
+                    | name = rewriteWith ctx.local custom.name
+                    , generics = Array.map (rewriteWith ctx.local) custom.generics
                     , constructors =
                           Array.map
                               (\ctor ->
-                                  { name = rewriteWith renames ctor.name
+                                  { name = rewriteWith ctx.local ctor.name
                                   , arguments =
-                                      Array.map (rewriteType renames)
+                                      Array.map (rewriteType ctx)
                                           ctor.arguments
                                   }) custom.constructors
                 }
 
         DeclPort signature ->
-            DeclPort (rewriteSignature renames signature)
+            DeclPort (rewriteSignature ctx signature)
 
         DeclInfix ->
             DeclInfix
 
         DeclDestructure { pattern = pattern, expression = expression } ->
             DeclDestructure
-                { pattern = rewritePattern renames pattern
-                , expression = rewriteExpr renames expression
+                { pattern = rewritePattern ctx pattern
+                , expression = rewriteExpr ctx expression
                 }
 
 
-rewriteSignature : RenameMap -> Signature -> Signature
-rewriteSignature renames signature =
-    { name = rewriteWith renames signature.name
-    , typeAnnotation = rewriteType renames signature.typeAnnotation
+rewriteSignature : Ctx -> Signature -> Signature
+rewriteSignature ctx signature =
+    { name = rewriteWith ctx.local signature.name
+    , typeAnnotation = rewriteType ctx signature.typeAnnotation
     }
 
 
-rewriteType : RenameMap -> TypeAnn -> TypeAnn
-rewriteType renames typeAnn =
+rewriteType : Ctx -> TypeAnn -> TypeAnn
+rewriteType ctx typeAnn =
     when typeAnn is
         TypeGeneric name ->
-            TypeGeneric (rewriteWith renames name)
+            TypeGeneric (rewriteWith ctx.local name)
 
         TypeTyped { ref = ref, arguments = args } ->
             TypeTyped
-                { ref = rewriteRef renames ref
-                , arguments = Array.map (rewriteType renames) args
+                { ref = rewriteRef ctx ref
+                , arguments = Array.map (rewriteType ctx) args
                 }
 
         TypeUnit ->
             TypeUnit
 
         TypeTuple items ->
-            TypeTuple (Array.map (rewriteType renames) items)
+            TypeTuple (Array.map (rewriteType ctx) items)
 
         TypeRecord fields ->
-            TypeRecord (Array.map (rewriteRecordFieldType renames) fields)
+            TypeRecord (Array.map (rewriteRecordFieldType ctx) fields)
 
         TypeGenericRecord { extension = ext, fields = fields } ->
             TypeGenericRecord
-                { extension = rewriteWith renames ext
-                , fields = Array.map (rewriteRecordFieldType renames) fields
+                { extension = rewriteWith ctx.local ext
+                , fields = Array.map (rewriteRecordFieldType ctx) fields
                 }
 
         TypeFunction { left = left, right = right } ->
             TypeFunction
-                { left = rewriteType renames left
-                , right = rewriteType renames right
+                { left = rewriteType ctx left
+                , right = rewriteType ctx right
                 }
 
 
-rewriteRecordFieldType : RenameMap -> RecordFieldType -> RecordFieldType
-rewriteRecordFieldType renames field =
+rewriteRecordFieldType : Ctx -> RecordFieldType -> RecordFieldType
+rewriteRecordFieldType ctx field =
     { name = rewriteField field.name
-    , typeAnnotation = rewriteType renames field.typeAnnotation
+    , typeAnnotation = rewriteType ctx field.typeAnnotation
     }
 
 
-rewritePattern : RenameMap -> Pattern -> Pattern
-rewritePattern renames pattern =
+rewritePattern : Ctx -> Pattern -> Pattern
+rewritePattern ctx pattern =
     when pattern is
         PatVar name ->
-            PatVar (rewriteWith renames name)
+            PatVar (rewriteWith ctx.local name)
 
         PatNamed { ref = ref, arguments = args } ->
             PatNamed
-                { ref = rewriteRef renames ref
-                , arguments = Array.map (rewritePattern renames) args
+                { ref = rewriteRef ctx ref
+                , arguments = Array.map (rewritePattern ctx) args
                 }
 
         PatAs { pattern = inner, name = name } ->
             PatAs
-                { pattern = rewritePattern renames inner
-                , name = rewriteWith renames name
+                { pattern = rewritePattern ctx inner
+                , name = rewriteWith ctx.local name
                 }
 
         PatRecord fields ->
@@ -584,30 +669,30 @@ rewritePattern renames pattern =
                 (Array.map
                     (\field ->
                         { name = rewriteField field.name
-                        , pattern = rewritePattern renames field.pattern
+                        , pattern = rewritePattern ctx field.pattern
                         }) fields)
 
         _ ->
-            Walk.mapPatternChildren (rewritePattern renames) pattern
+            Walk.mapPatternChildren (rewritePattern ctx) pattern
 
 
-rewriteExpr : RenameMap -> Expr -> Expr
-rewriteExpr renames expr =
+rewriteExpr : Ctx -> Expr -> Expr
+rewriteExpr ctx expr =
     when expr is
         ExprVar ref ->
-            ExprVar (rewriteRef renames ref)
+            ExprVar (rewriteRef ctx ref)
 
         ExprRecord fields ->
             ExprRecord
                 (Array.map
                     (\field ->
                         { name = rewriteField field.name
-                        , value = rewriteExpr renames field.value
+                        , value = rewriteExpr ctx field.value
                         }) fields)
 
         ExprAccess { record = record, field = field } ->
             ExprAccess
-                { record = rewriteExpr renames record
+                { record = rewriteExpr ctx record
                 , field = rewriteField field
                 }
 
@@ -616,18 +701,18 @@ rewriteExpr renames expr =
 
         ExprUpdate { name = name, fields = fields } ->
             ExprUpdate
-                { name = rewriteWith renames name
+                { name = rewriteWith ctx.local name
                 , fields =
                     Array.map
                         (\field ->
                             { name = rewriteField field.name
-                            , value = rewriteExpr renames field.value
+                            , value = rewriteExpr ctx field.value
                             }) fields
                 }
 
         _ ->
-            Walk.mapExprChildrenWithPatterns (rewriteExpr renames)
-                (rewritePattern renames) expr
+            Walk.mapExprChildrenWithPatterns (rewriteExpr ctx)
+                (rewritePattern ctx) expr
 
 
 rewriteDocsComment : RenameMap -> String -> String
@@ -679,25 +764,43 @@ rewriteDocsTokens renames line =
         |> String.join " "
 
 
-rewriteLetDecl : RenameMap -> LetDecl -> LetDecl
-rewriteLetDecl renames declaration =
+rewriteLetDecl : Ctx -> LetDecl -> LetDecl
+rewriteLetDecl ctx declaration =
     when declaration is
         LetFunction fn ->
             LetFunction
                 { fn
-                    | name = rewriteWith renames fn.name
+                    | name = rewriteWith ctx.local fn.name
                     , arguments =
-                          Array.map (rewritePattern renames) fn.arguments
-                    , expression = rewriteExpr renames fn.expression
+                          Array.map (rewritePattern ctx) fn.arguments
+                    , expression = rewriteExpr ctx fn.expression
                 }
 
         LetDestructure _ ->
-            Walk.mapLetDecl (rewriteExpr renames) (rewritePattern renames)
+            Walk.mapLetDecl (rewriteExpr ctx) (rewritePattern ctx)
                 declaration
 
 
-rewriteRef : RenameMap -> NamedRef -> NamedRef
-rewriteRef renames ref =
+{-| A bare reference (`moduleName = Nothing`) is a local/own name → the local
+occupancy map. A reference the extractor resolved to a module (`Just m`, both
+`m.name` and unqualified names imported from `m`) → `m`'s own export decision
+from the package map, so the caller never disagrees with the callee. Names the
+package map does not carry (external Gren deps, non-reserved names) pass
+through unchanged.
+-}
+rewriteRef : Ctx -> NamedRef -> NamedRef
+rewriteRef ctx ref =
     { moduleName = ref.moduleName
-    , name = rewriteWith renames ref.name
+    , name =
+        when ref.moduleName is
+            Nothing ->
+                rewriteWith ctx.local ref.name
+
+            Just moduleName ->
+                when Dict.get (moduleName ++ "." ++ ref.name) ctx.package is
+                    Just escaped ->
+                        escaped
+
+                    Nothing ->
+                        ref.name
     }

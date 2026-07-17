@@ -8,12 +8,14 @@ import Ast.Print as Print
 import Ast.Reserved as Reserved
 import Ast.Types exposing
     ( Declaration(..)
+    , ExposedItem(..)
     , Exposing(..)
     , Expr(..)
     , File
     , ModuleKind(..)
     , Pattern(..)
     )
+import Dict
 import String
 
 
@@ -28,6 +30,7 @@ tests : Array TestResult
 tests =
     [ reservedEscapesAroundExistingUnderscore
     , docsRewriteKeepsCommasWhenNameUnchanged
+    , crossModuleReferenceFollowsDefiningModuleEscape
     ]
 
 
@@ -49,7 +52,7 @@ docsRewriteKeepsCommasWhenNameUnchanged =
 
         printed =
             file
-                |> Reserved.apply
+                |> Reserved.apply Dict.empty
                 |> Print.print
 
         passed =
@@ -104,7 +107,7 @@ reservedEscapesAroundExistingUnderscore =
 
         printed =
             file
-                |> Reserved.apply
+                |> Reserved.apply Dict.empty
                 |> Print.print
 
         passed =
@@ -119,6 +122,122 @@ reservedEscapesAroundExistingUnderscore =
         "reserved escape skips existing when_ binder"
         passed
         ("printed:\n" ++ printed)
+
+
+{-| D18: occupancy escapes are per-module. `Lib` exports `when` but also binds
+`when_`, so it escalates its export to `when__`; a caller `Caller` that lacks
+`when_` would pick `when_` on its own. Rewriting the qualified reference and
+the `import Lib exposing (when)` list from `Caller`'s map would emit
+`Lib.when_` / `exposing (when_)` while `Lib` exposes `when__` — a broken call.
+With the package export map, both the qualified ref and the import follow
+`Lib`'s decision (`when__`), matching what `Lib` emits.
+-}
+crossModuleReferenceFollowsDefiningModuleEscape : TestResult
+crossModuleReferenceFollowsDefiningModuleEscape =
+    let
+        -- `Lib` exposes `when`, and internally binds `when_`, forcing `when`
+        -- to escalate to `when__` in `Lib` only.
+        lib =
+            { schemaVersion = 1
+            , moduleDefinition =
+                { kind = NormalModule
+                , moduleName = "Lib"
+                , exposing_ = ExposeExplicit [ ExposeFunction "when" ]
+                }
+            , comments = []
+            , imports = []
+            , declarations =
+                [ DeclFunction
+                    { name = "when_"
+                    , documentation = Nothing
+                    , signature = Nothing
+                    , arguments = [ PatVar "n" ]
+                    , expression = ExprVar { moduleName = Nothing, name = "n" }
+                    }
+                , DeclFunction
+                    { name = "when"
+                    , documentation = Nothing
+                    , signature = Nothing
+                    , arguments = [ PatVar "x" ]
+                    , expression =
+                        ExprApplication
+                            [ ExprVar { moduleName = Nothing, name = "when_" }
+                            , ExprVar { moduleName = Nothing, name = "x" }
+                            ]
+                    }
+                ]
+            }
+
+        -- `Caller` imports `Lib exposing (when)` and references it both
+        -- unqualified (resolved to `Lib` by the extractor) and qualified.
+        -- It has no `when_`, so on its own it would pick `when_`.
+        caller =
+            { schemaVersion = 1
+            , moduleDefinition =
+                { kind = NormalModule
+                , moduleName = "Caller"
+                , exposing_ = ExposeExplicit [ ExposeFunction "total" ]
+                }
+            , comments = []
+            , imports =
+                [ { moduleName = "Lib"
+                  , alias = Nothing
+                  , exposing_ = Just (ExposeExplicit [ ExposeFunction "when" ])
+                  }
+                ]
+            , declarations =
+                [ DeclFunction
+                    { name = "total"
+                    , documentation = Nothing
+                    , signature = Nothing
+                    , arguments = []
+                    , expression =
+                        ExprApplication
+                            [ ExprVar { moduleName = Just "Lib", name = "when" }
+                            , ExprVar { moduleName = Nothing, name = "x" }
+                            ]
+                    }
+                ]
+            }
+
+        packageExports =
+            Dict.union
+                (Reserved.exportRenames lib)
+                (Reserved.exportRenames caller)
+
+        libDecision =
+            Dict.get "Lib.when" packageExports
+                |> Maybe.withDefault "<missing>"
+
+        libPrinted =
+            Print.print (Reserved.apply packageExports lib)
+
+        callerPrinted =
+            Print.print (Reserved.apply packageExports caller)
+
+        passed =
+            -- Lib escalates its own export to `when__`.
+            libDecision
+                == "when__"
+                -- Lib emits the escalated export.
+                && String.contains "when__" libPrinted
+                -- Caller's qualified ref follows Lib, not its own occupancy.
+                && String.contains "Lib.when__" callerPrinted
+                -- Caller's import `exposing` list follows Lib too.
+                && String.contains "when__" callerPrinted
+                -- The desynced single-underscore form must NOT appear.
+                && not (String.contains "Lib.when_ " callerPrinted)
+    in
+    outcome
+        "cross-module reference follows defining module's reserved escape"
+        passed
+        ("libDecision: "
+            ++ libDecision
+            ++ "\nlibPrinted:\n"
+            ++ libPrinted
+            ++ "\ncallerPrinted:\n"
+            ++ callerPrinted
+        )
 
 
 emptyFile : Array Declaration -> File

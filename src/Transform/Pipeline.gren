@@ -371,6 +371,18 @@ transform registry extraction sources =
 
                     packageSoleCtors =
                         collectPackageSoleCtors registry extraction.modules
+
+                    -- Reserved renames escape per-module, so a caller must not
+                    -- re-decide a callee's exported name; collect every
+                    -- module's own decision so cross-module references stay in
+                    -- sync. Built off the same lowering chain the per-module
+                    -- transform runs, so keys/occupancy match exactly.
+                    packageReservedExports =
+                        collectPackageReservedExports registry
+                            packageRecordAliases
+                            packageCtorArities
+                            packageSoleCtors
+                            extraction.modules
                 in
                 sources
                     |> Array.sortBy (\source -> (normalizePath source.path).path)
@@ -385,6 +397,7 @@ transform registry extraction sources =
                                                     packageRecordAliases
                                                     packageCtorArities
                                                     packageSoleCtors
+                                                    packageReservedExports
                                                     source
                                                 )
                                             |> Result.map (\module_ -> Array.pushLast module_ modules)
@@ -446,6 +459,47 @@ collectPackageSoleCtors registry modules =
     foldNamedAsts registry modules AstMatchCompile.collectSoleCtorsFromFile Dict.empty
 
 
+{-| `"Module.reserved"` → escaped export name, from every AST in the package.
+Lowered through the same NameSub → RecordAlias → CtorLaw → MatchCompile chain a
+module runs before `AstReserved.apply`, so a module's own package entry equals
+the local escape `apply` derives — the invariant that keeps cross-module
+qualified references and import `exposing` lists in sync.
+-}
+collectPackageReservedExports :
+    Registry
+    -> Dict String (Array String)
+    -> Dict String Int
+    -> Dict String {}
+    -> Array Protocol.ModuleExtraction
+    -> Dict String String
+collectPackageReservedExports registry recordAliases ctorArities soleCtors modules =
+    Array.foldl
+        (\moduleExtraction acc ->
+            when moduleExtraction.ast is
+                Nothing ->
+                    acc
+
+                Just astValue ->
+                    when AstDecode.decode astValue is
+                        Err _ ->
+                            acc
+
+                        Ok file ->
+                            let
+                                lowered =
+                                    file
+                                        |> AstNameSub.apply registry
+                                        |> AstRecordAlias.apply recordAliases
+                                        |> AstCtorLaw.apply ctorArities
+                                        |> AstMatchCompile.compile soleCtors
+                            in
+                            Dict.foldl Dict.set acc
+                                (AstReserved.exportRenames lowered)
+        )
+        Dict.empty
+        modules
+
+
 {-| Decode each module AST, apply NameSub, then merge `collect` into `acc`.
 -}
 foldNamedAsts :
@@ -479,10 +533,11 @@ transformModule :
     -> Dict String (Array String)
     -> Dict String Int
     -> Dict String {}
+    -> Dict String String
     -> SourceFile
     -> Protocol.ModuleExtraction
     -> Result Error TransformedModule
-transformModule registry packageRecordAliases packageCtorArities packageSoleCtors input extraction =
+transformModule registry packageRecordAliases packageCtorArities packageSoleCtors packageReservedExports input extraction =
     toGrenSourcePath input.path
         |> Result.andThen
             (\outputPath ->
@@ -499,6 +554,7 @@ transformModule registry packageRecordAliases packageCtorArities packageSoleCtor
                             packageRecordAliases
                             packageCtorArities
                             packageSoleCtors
+                            packageReservedExports
                             input
                             extraction
                             outputPath
@@ -511,12 +567,13 @@ transformModuleViaAst :
     -> Dict String (Array String)
     -> Dict String Int
     -> Dict String {}
+    -> Dict String String
     -> SourceFile
     -> Protocol.ModuleExtraction
     -> String
     -> Decode.Value
     -> Result Error TransformedModule
-transformModuleViaAst registry packageRecordAliases packageCtorArities packageSoleCtors input extraction outputPath astValue =
+transformModuleViaAst registry packageRecordAliases packageCtorArities packageSoleCtors packageReservedExports input extraction outputPath astValue =
     when AstDecode.decode astValue is
         Err decodeError ->
             Err <|
@@ -535,7 +592,7 @@ transformModuleViaAst registry packageRecordAliases packageCtorArities packageSo
                         |> AstRecordAlias.apply packageRecordAliases
                         |> AstCtorLaw.apply packageCtorArities
                         |> AstMatchCompile.compile packageSoleCtors
-                        |> AstReserved.apply
+                        |> AstReserved.apply packageReservedExports
 
                 printed =
                     AstPrint.print lowered

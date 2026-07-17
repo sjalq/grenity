@@ -70,6 +70,8 @@
           "values": {
             "empty": "ElmToGren.Compat.Array.empty",
             "append": "ElmToGren.Compat.Array.append",
+            "get": "ElmToGren.Compat.Array.get",
+            "set": "ElmToGren.Compat.Array.set",
             "initialize": "ElmToGren.Compat.Array.initialize",
             "fromList": "ElmToGren.Compat.Array.fromList",
             "push": "pushLast",

@@ -14,6 +14,12 @@ Laws under test:
   - `Array.append a b == a ++ b` (Elm order). Gren's `Array.append` is
     argument-flipped as well; the Compat adapter restores Elm order with `++`.
   - `n // 0 == 0`. Elm and Gren agree here, so no adapter is required.
+  - `Array.get i` / `Array.set i` return Nothing / leave the array unaltered
+    for ANY out-of-range i in Elm. Gren counts negative indices from the end,
+    so the Compat adapters guard `i < 0`.
+  - `Array.slice` treats negative indices identically in Elm and Gren
+    (count from the end, clamp, empty when crossed) — parity asserted, no
+    adapter.
 
 -}
 
@@ -33,6 +39,9 @@ tests =
     [ stringAppendPreservesElmOrder
     , arrayAppendPreservesElmOrder
     , intDivideByZeroIsZero
+    , arrayGetMatchesElmBounds
+    , arraySetMatchesElmBounds
+    , arraySliceParity
     ]
 
 
@@ -52,6 +61,29 @@ compatStringAppend lhs rhs =
 compatArrayAppend : Array a -> Array a -> Array a
 compatArrayAppend lhs rhs =
     lhs ++ rhs
+
+
+{-| Mirrors `ElmToGren.Compat.Array.get`: negative indices are out of range.
+-}
+compatArrayGet : Int -> Array a -> Maybe a
+compatArrayGet index values =
+    if index < 0 then
+        Nothing
+
+    else
+        Array.get index values
+
+
+{-| Mirrors `ElmToGren.Compat.Array.set`: negative indices leave the array
+unaltered.
+-}
+compatArraySet : Int -> a -> Array a -> Array a
+compatArraySet index value values =
+    if index < 0 then
+        values
+
+    else
+        Array.set index value values
 
 
 
@@ -210,6 +242,165 @@ runtime predicate. This keeps `n // 0` a genuine runtime division.
 runtimeZero : Int -> Int
 runtimeZero seed =
     Array.length (Array.keepIf (\value -> value > seed && value < seed) [ seed, seed + 1, seed + 2 ])
+
+
+-- ROWS 4-6: ARRAY INDEX BOUNDS (D5)
+
+
+{-| Seed reduced to an index in -6..6 (covers negative, in-range, too-large).
+-}
+smallIndex : Int -> Int
+smallIndex seed =
+    (seed - (seed // 13) * 13) - 6
+
+
+{-| Elm reference: out of range in EITHER direction is Nothing.
+-}
+elmGet : Int -> Array a -> Maybe a
+elmGet index values =
+    if index < 0 || index >= Array.length values then
+        Nothing
+
+    else
+        Array.get index values
+
+
+{-| Elm reference: out of range in EITHER direction leaves the array unaltered.
+-}
+elmSet : Int -> a -> Array a -> Array a
+elmSet index value values =
+    if index < 0 || index >= Array.length values then
+        values
+
+    else
+        Array.set index value values
+
+
+{-| Elm reference slice from first principles (no native slice): negative
+indices count from the end, clamp to bounds, crossed range is empty.
+-}
+elmSlice : Int -> Int -> Array a -> Array a
+elmSlice from to values =
+    let
+        len =
+            Array.length values
+
+        resolve raw =
+            if raw < 0 then
+                len + raw
+
+            else
+                raw
+
+        lo =
+            min (max 0 (resolve from)) len
+
+        hi =
+            min (max 0 (resolve to)) len
+    in
+    if lo >= hi then
+        []
+
+    else
+        Array.dropFirst lo (Array.takeFirst hi values)
+
+
+arrayGetMatchesElmBounds : TestResult
+arrayGetMatchesElmBounds =
+    let
+        outcomes =
+            Array.map
+                (\seed ->
+                    let
+                        index =
+                            smallIndex seed
+
+                        values =
+                            Array.range 1 (1 + fifthRemainder (lcgNext seed))
+
+                        adapter =
+                            compatArrayGet index values
+                    in
+                    { matches = adapter == elmGet index values
+                    , nativeDiverges = Array.get index values /= adapter
+                    }
+                )
+                (seedStream sampleCount 246813579)
+
+        divergences =
+            Array.length (Array.keepIf .nativeDiverges outcomes)
+    in
+    { name = "Array.get: out-of-range is Nothing in both directions (D5)"
+    , passed = Array.all .matches outcomes && divergences > 0
+    , details =
+        String.fromInt (Array.length outcomes)
+            ++ " seeded (index, array) pairs incl. negatives; adapter == Elm on all; native Gren wraps "
+            ++ String.fromInt divergences
+            ++ " (non-vacuity: must be > 0)"
+    }
+
+
+arraySetMatchesElmBounds : TestResult
+arraySetMatchesElmBounds =
+    let
+        outcomes =
+            Array.map
+                (\seed ->
+                    let
+                        index =
+                            smallIndex seed
+
+                        values =
+                            Array.range 1 (1 + fifthRemainder (lcgNext seed))
+
+                        adapter =
+                            compatArraySet index 999 values
+                    in
+                    { matches = adapter == elmSet index 999 values
+                    , nativeDiverges = Array.set index 999 values /= adapter
+                    }
+                )
+                (seedStream sampleCount 135792468)
+
+        divergences =
+            Array.length (Array.keepIf .nativeDiverges outcomes)
+    in
+    { name = "Array.set: out-of-range leaves the array unaltered (D5)"
+    , passed = Array.all .matches outcomes && divergences > 0
+    , details =
+        String.fromInt (Array.length outcomes)
+            ++ " seeded (index, array) pairs incl. negatives; adapter == Elm on all; native Gren wraps "
+            ++ String.fromInt divergences
+            ++ " (non-vacuity: must be > 0)"
+    }
+
+
+arraySliceParity : TestResult
+arraySliceParity =
+    let
+        outcomes =
+            Array.map
+                (\seed ->
+                    let
+                        from =
+                            smallIndex seed
+
+                        to =
+                            smallIndex (lcgNext seed)
+
+                        values =
+                            Array.range 1 (1 + fifthRemainder (lcgNext (lcgNext seed)))
+                    in
+                    Array.slice from to values == elmSlice from to values
+                )
+                (seedStream sampleCount 864209753)
+    in
+    { name = "Array.slice: Elm and Gren negative-index semantics agree (no adapter)"
+    , passed = Array.all identity outcomes
+    , details =
+        String.fromInt (Array.length outcomes)
+            ++ " seeded (from, to, array) triples incl. negatives and crossed ranges"
+    }
 
 
 intDivideByZeroIsZero : TestResult

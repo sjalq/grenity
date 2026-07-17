@@ -264,10 +264,10 @@ no compiler in the loop.
 
 ### W2 — Fix confirmed silent-wrong-output bugs (property first, then fix)
 
-- [ ] W2.1 [M2] D3: merge ALL cons peers in `tryCtorEmbeddedCase` with correct arm
+- [x] W2.1 [M2] D3: merge ALL cons peers in `tryCtorEmbeddedCase` with correct arm
       ordering. Done-condition: its `knownMiscompiles` entry flips to a direct green
       assertion. Prove: tier 0 + tier 1.
-- [ ] W2.2 [M2] D4: `ctorEmptyFallback` consults the top-level `_`/irrefutable arm
+- [x] W2.2 [M2] D4: `ctorEmptyFallback` consults the top-level `_`/irrefutable arm
       before emitting `Debug.todo`; reachable `Debug.todo` is never acceptable output.
       Done-condition: entry flips green. Prove: tier 0 + tier 1.
 - [x] W2.3 [M2] D2: map `append` (List/Array/String) to argument-order-preserving
@@ -275,14 +275,16 @@ no compiler in the loop.
       keeps emitted code readable). **Begins the P2 table**: create
       `test/MappingSemanticsTest.gren` with the append rows (W4.1 grows it).
       Prove: tier 0 + tier 1.
-- [ ] W2.4 [M2] D5: write the divergence property for negative indices, then decide:
+- [x] W2.4 [M2] D5: write the divergence property for negative indices, then decide:
       guarded Compat shim vs documented deviation. A deviation is only acceptable with
       the ledger `deviations` stamp on every affected package once the walk runs (W5.7
       re-checks reachability across the full snapshot, not just curated). Requires:
       W3.6. Prove: tier 0 + tier 2 (direct ports of 3–5 index-arithmetic-heavy
       catalog packages — name them in the task when selected).
-- [ ] W2.5 [M2] D18: audit Reserved cross-module renames with a multi-module fixture;
+- [x] W2.5 [M2] D18: audit Reserved cross-module renames with a multi-module fixture;
       fix if real, else record "audited sound, fixture: <path>" here.
+      D18 CONFIRMED REAL: cross-module refs used caller's occupancy map instead of
+      defining module's. Fixed with package-wide reserved-export map.
       Prove: tier 0 (fixture) + tier 1.
 - [x] W5.2 [M2] Ledger + snapshot (numbered for history; lives in M2 by tag):
       commit `test/ecosystem/registry-snapshot.json` (fetched from
@@ -476,7 +478,7 @@ DONE = M5.G and M6.G pass on the same clean commit.
 
 ## STATUS
 
-- Active milestone: **M2**. Next: W2.4 (mine); harvest W2.1/W2.2, W2.5; then M2.G.
+- Active milestone: **M2**. Next: M2.G gate (tier 3 both suites).
 - 2026-07-17 M1.G PASSED: tier 0 = 154 checks 0.70s; tier 1 = canary 14/14 30.5s +
   rule 4.1s + format 2.2s (~37s total); knownMiscompiles registered and red (D3/D4
   fixtures assert divergence).

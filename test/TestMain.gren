@@ -17,6 +17,7 @@ import Emit.WorkspaceTest
 import FileSystem
 import Init
 import Mapping.Tests
+import MappingSemanticsTest
 import Node
 import Resolve.SolverTest
 import Stream.Log
@@ -86,6 +87,7 @@ allChecks =
     , Ast.ReservedTest.tests
     , Ast.RecordAliasTest.tests
     , Ast.TransformLawTest.tests
+    , MappingSemanticsTest.tests
     , Mapping.Tests.checks
         |> Array.map
             (\check ->

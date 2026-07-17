@@ -1,0 +1,237 @@
+module MappingSemanticsTest exposing (tests)
+
+{-| P2 differential table.
+
+Each row exercises LCG-seeded inputs and compares an actual behavior (a Compat
+adapter body, replicated here, or Gren's native operator) against an
+Elm-semantics reference.
+
+Laws under test:
+
+  - `String.append a b == a ++ b` (Elm order). Gren's `String.append` is
+    argument-flipped (`append a b == b ++ a`), so the Compat adapter restores
+    Elm order with `++`.
+  - `Array.append a b == a ++ b` (Elm order). Gren's `Array.append` is
+    argument-flipped as well; the Compat adapter restores Elm order with `++`.
+  - `n // 0 == 0`. Elm and Gren agree here, so no adapter is required.
+
+-}
+
+import Array exposing (Array)
+import String
+
+
+type alias TestResult =
+    { name : String
+    , passed : Bool
+    , details : String
+    }
+
+
+tests : Array TestResult
+tests =
+    [ stringAppendPreservesElmOrder
+    , arrayAppendPreservesElmOrder
+    , intDivideByZeroIsZero
+    ]
+
+
+
+-- COMPAT ADAPTER BODIES (replicated from Mapping.Adapter)
+
+
+{-| Mirrors `ElmToGren.Compat.String.append`: `a ++ b` restores Elm order.
+-}
+compatStringAppend : String -> String -> String
+compatStringAppend lhs rhs =
+    lhs ++ rhs
+
+
+{-| Mirrors `ElmToGren.Compat.Array.append`: `a ++ b` restores Elm order.
+-}
+compatArrayAppend : Array a -> Array a -> Array a
+compatArrayAppend lhs rhs =
+    lhs ++ rhs
+
+
+
+-- LCG SEEDED INPUTS (Park-Miller MINSTD; pure Basics arithmetic, no modBy)
+
+
+sampleCount : Int
+sampleCount =
+    64
+
+
+lcgModulus : Int
+lcgModulus =
+    2147483647
+
+
+{-| MINSTD step. `16807 * seed` stays below 2^53, so no precision is lost, and
+modulo is taken with `//` because Basics does not expose `modBy`.
+-}
+lcgNext : Int -> Int
+lcgNext seed =
+    let
+        product =
+            16807 * seed
+    in
+    product - (product // lcgModulus) * lcgModulus
+
+
+{-| `count` pseudo-random seeds derived from `initial`.
+-}
+seedStream : Int -> Int -> Array Int
+seedStream count initial =
+    let
+        folded =
+            Array.foldl
+                (\_ acc ->
+                    let
+                        nextSeed =
+                            lcgNext acc.seed
+                    in
+                    { seed = nextSeed, values = Array.pushLast nextSeed acc.values }
+                )
+                { seed = initial, values = [] }
+                (Array.repeat count 0)
+    in
+    folded.values
+
+
+{-| Seed reduced to 0..4 via `//` arithmetic (no modBy available).
+-}
+fifthRemainder : Int -> Int
+fifthRemainder seed =
+    seed - (seed // 5) * 5
+
+
+
+-- ROW 1: STRING APPEND ORDER
+
+
+stringAppendPreservesElmOrder : TestResult
+stringAppendPreservesElmOrder =
+    let
+        outcomes =
+            Array.map
+                (\seed ->
+                    let
+                        lhs =
+                            "L" ++ String.fromInt seed
+
+                        rhs =
+                            "R" ++ String.fromInt (lcgNext seed)
+
+                        adapter =
+                            compatStringAppend lhs rhs
+
+                        elmOrdered =
+                            String.startsWith lhs adapter
+                                && String.endsWith rhs adapter
+                                && String.count adapter == String.count lhs + String.count rhs
+
+                        native =
+                            String.append lhs rhs
+                    in
+                    { elmOrdered = elmOrdered, nativeDiverges = native /= adapter }
+                )
+                (seedStream sampleCount 123459871)
+
+        divergences =
+            Array.length (Array.keepIf .nativeDiverges outcomes)
+    in
+    { name = "String.append preserves Elm argument order (a ++ b)"
+    , passed = Array.all .elmOrdered outcomes
+    , details =
+        String.fromInt (Array.length outcomes)
+            ++ " seeded pairs; adapter matches Elm order on all; Gren native String.append flips "
+            ++ String.fromInt divergences
+            ++ " of them"
+    }
+
+
+
+-- ROW 2: ARRAY APPEND ORDER
+
+
+arrayAppendPreservesElmOrder : TestResult
+arrayAppendPreservesElmOrder =
+    let
+        outcomes =
+            Array.map
+                (\seed ->
+                    let
+                        lhs =
+                            Array.range 1 (1 + fifthRemainder seed)
+
+                        rhs =
+                            Array.range 100 (100 + fifthRemainder (lcgNext seed))
+
+                        adapter =
+                            compatArrayAppend lhs rhs
+
+                        elmOrdered =
+                            Array.takeFirst (Array.length lhs) adapter
+                                == lhs
+                                && Array.dropFirst (Array.length lhs) adapter
+                                == rhs
+                                && Array.length adapter
+                                == Array.length lhs + Array.length rhs
+
+                        native =
+                            Array.append lhs rhs
+                    in
+                    { elmOrdered = elmOrdered, nativeDiverges = native /= adapter }
+                )
+                (seedStream sampleCount 987654319)
+
+        divergences =
+            Array.length (Array.keepIf .nativeDiverges outcomes)
+    in
+    { name = "Array.append preserves Elm argument order (a ++ b)"
+    , passed = Array.all .elmOrdered outcomes
+    , details =
+        String.fromInt (Array.length outcomes)
+            ++ " seeded pairs; adapter matches Elm order on all; Gren native Array.append flips "
+            ++ String.fromInt divergences
+            ++ " of them"
+    }
+
+
+
+-- ROW 3: INTEGER DIVISION BY ZERO
+
+
+{-| Zero the compiler cannot constant-fold: the length of an array emptied by a
+runtime predicate. This keeps `n // 0` a genuine runtime division.
+-}
+runtimeZero : Int -> Int
+runtimeZero seed =
+    Array.length (Array.keepIf (\value -> value > seed && value < seed) [ seed, seed + 1, seed + 2 ])
+
+
+intDivideByZeroIsZero : TestResult
+intDivideByZeroIsZero =
+    let
+        outcomes =
+            Array.map
+                (\seed ->
+                    let
+                        numerator =
+                            seed - lcgModulus // 2
+
+                        quotient =
+                            numerator // runtimeZero seed
+                    in
+                    quotient == 0
+                )
+                (seedStream sampleCount 192837461)
+    in
+    { name = "Integer // by zero is 0 (Elm and Gren agree)"
+    , passed = Array.all identity outcomes
+    , details =
+        String.fromInt (Array.length outcomes)
+            ++ " seeded numerators; n // 0 == 0 for all"
+    }

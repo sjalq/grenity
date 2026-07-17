@@ -270,7 +270,7 @@ no compiler in the loop.
 - [ ] W2.2 [M2] D4: `ctorEmptyFallback` consults the top-level `_`/irrefutable arm
       before emitting `Debug.todo`; reachable `Debug.todo` is never acceptable output.
       Done-condition: entry flips green. Prove: tier 0 + tier 1.
-- [ ] W2.3 [M2] D2: map `append` (List/Array/String) to argument-order-preserving
+- [x] W2.3 [M2] D2: map `append` (List/Array/String) to argument-order-preserving
       output (flipped call or `a ++ b` at the catalog layer, or Compat — pick what
       keeps emitted code readable). **Begins the P2 table**: create
       `test/MappingSemanticsTest.gren` with the append rows (W4.1 grows it).
@@ -476,7 +476,7 @@ DONE = M5.G and M6.G pass on the same clean commit.
 
 ## STATUS
 
-- Active milestone: **M2**. Next: harvest W2.x delegates; W2.4; then M2.G.
+- Active milestone: **M2**. Next: W2.4 (mine); harvest W2.1/W2.2, W2.5; then M2.G.
 - 2026-07-17 M1.G PASSED: tier 0 = 154 checks 0.70s; tier 1 = canary 14/14 30.5s +
   rule 4.1s + format 2.2s (~37s total); knownMiscompiles registered and red (D3/D4
   fixtures assert divergence).
@@ -493,6 +493,11 @@ DONE = M5.G and M6.G pass on the same clean commit.
   npm run test:ledger); status.cjs prints LEDGER section. All seeded entries
   currently STALE by law (stamped 0d0ce41, src/ changed since) — M2.G's tier-3
   rerun reseeds. (Delegate-implemented, validated + merged here.)
+- 2026-07-17 W2.3: append D2 fixed via curried ElmToGren.Compat.{List,Array,String}.append
+  adapters (partial applications stay correct); P2 table begun in
+  test/MappingSemanticsTest.gren (seeded rows: append order with 64/64 native-flip
+  divergence measured, //-by-zero). End-to-end fixture port verified Elm order.
+  Tier 0: 161 checks; canary 14/14. (Delegate-implemented, validated + merged.)
 - 2026-07-17 tier-0 wall measured: 0.70s warm (`npm test`, 154 checks incl. 240
   property samples); bare runner 0.16s.
 - 2026-07-17: Plan created from full-project audit (§6), adversarially reviewed

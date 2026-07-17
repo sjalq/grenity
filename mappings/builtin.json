@@ -44,6 +44,7 @@
           "target": "Array",
           "values": {
             "(::)": "pushFirst",
+            "append": "ElmToGren.Compat.List.append",
             "filter": "keepIf",
             "filterMap": "mapAndKeepJust",
             "sum": "ElmToGren.Compat.List.sum",
@@ -68,6 +69,7 @@
           "target": "Array",
           "values": {
             "empty": "ElmToGren.Compat.Array.empty",
+            "append": "ElmToGren.Compat.Array.append",
             "initialize": "ElmToGren.Compat.Array.initialize",
             "fromList": "ElmToGren.Compat.Array.fromList",
             "push": "pushLast",
@@ -97,6 +99,7 @@
           "target": "String",
           "values": {
             "length": "count",
+            "append": "ElmToGren.Compat.String.append",
             "concat": "ElmToGren.Compat.String.concat",
             "left": "takeFirst",
             "right": "takeLast",

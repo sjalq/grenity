@@ -782,7 +782,7 @@ toHtmlWith _ attributes markdown =
 arraySource : String
 arraySource =
     """
-module ElmToGren.Compat.Array exposing (empty, initialize, fromList, toList, toIndexedList)
+module ElmToGren.Compat.Array exposing (empty, initialize, fromList, toList, toIndexedList, append)
 
 import Array exposing (Array)
 
@@ -790,6 +790,14 @@ import Array exposing (Array)
 empty : Array a
 empty =
     []
+
+
+{-| Elm `Array.append a b == a ++ b`. Gren's `Array.append` flips its arguments
+to be pipe-friendly (`append a b == b ++ a`), so restore Elm order with `++`.
+-}
+append : Array a -> Array a -> Array a
+append lhs rhs =
+    lhs ++ rhs
 
 
 initialize : Int -> (Int -> a) -> Array a
@@ -887,7 +895,7 @@ toLocaleUpper char =
 listSource : String
 listSource =
     """
-module ElmToGren.Compat.List exposing (sum, product, map4, map5, tail, partition, unzip)
+module ElmToGren.Compat.List exposing (sum, product, map4, map5, tail, partition, unzip, append)
 
 import Array exposing (Array)
 import Maybe exposing (Maybe(..))
@@ -896,6 +904,14 @@ import Maybe exposing (Maybe(..))
 sum : Array number -> number
 sum values =
     Array.foldl (+) 0 values
+
+
+{-| Elm `List.append a b == a ++ b`. Gren maps List onto Array, whose `append`
+flips its arguments to be pipe-friendly, so restore Elm order with `++`.
+-}
+append : Array a -> Array a -> Array a
+append lhs rhs =
+    lhs ++ rhs
 
 
 product : Array number -> number
@@ -985,7 +1001,7 @@ mapBoth fnFirst fnSecond value =
 stringSource : String
 stringSource =
     """
-module ElmToGren.Compat.String exposing (concat, uncons)
+module ElmToGren.Compat.String exposing (concat, uncons, append)
 
 import Array exposing (Array)
 import Maybe exposing (Maybe(..))
@@ -995,6 +1011,14 @@ import String
 concat : Array String -> String
 concat strings =
     String.join "" strings
+
+
+{-| Elm `String.append a b == a ++ b`. Gren's `String.append` flips its
+arguments to be pipe-friendly, so restore Elm order with `++`.
+-}
+append : String -> String -> String
+append lhs rhs =
+    lhs ++ rhs
 
 
 uncons : String -> Maybe { first : Char, second : String }

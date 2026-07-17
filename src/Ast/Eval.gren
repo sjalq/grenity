@@ -1,0 +1,1418 @@
+module Ast.Eval exposing
+    ( Context
+    , MatchResult(..)
+    , Outcome(..)
+    , Value(..)
+    , contextFromFile
+    , emptyContext
+    , evalExpr
+    , matchPattern
+    , run
+    , valueEq
+    )
+
+{-| Declaration-aware reference evaluator for `Ast.Types` expressions.
+
+Law: for any semantics-preserving transform `T` in the host pipeline
+(RecordAlias, CtorLaw, MatchCompile) and any production-reachable expression
+`e`: `run ctx fuel e == run ctx fuel' (T e)` up to fuel. The value universe is
+the canonical post-law (Gren) shape, so a correct transform is value-identity:
+
+  - tuples evaluate to `{ first, second[, third] }` records
+  - record-alias constructors evaluate to their record (fields in decl order)
+  - custom-type ctors evaluate to `VCtor` (name + collected args; arity from
+    the declaration tables), curried like functions
+  - `Debug.todo` evaluates to `Crashed` — distinct from every value and from
+    `Stuck`, so "the transform introduced a reachable crash" is expressible
+
+`Stuck` means the evaluator cannot decide (unsupported form, unbound name,
+non-exhaustive generated case, out of fuel). Properties must DISCARD stuck
+runs, never count them as agreement or disagreement.
+
+Scope limits (recorded, not accidental): recursion is supported for
+top-level declarations only (free names fall back to the declaration tables);
+a `let`-bound function cannot call itself. Ctor identity is the bare name
+(cross-module ctor collisions are out of generated-universe scope).
+-}
+
+import Array exposing ( Array )
+import Ast.Types exposing
+    ( CaseArm
+    , Declaration(..)
+    , Expr(..)
+    , Field
+    , File
+    , LetDecl(..)
+    , NamedRef
+    , Pattern(..)
+    , TypeAnn(..)
+    )
+import Dict exposing ( Dict )
+import Maybe exposing ( Maybe(..) )
+
+
+
+-- VALUES ----------------------------------------------------------------------
+
+
+type Value
+    = VInt Int
+    | VFloat Float
+    | VString String
+    | VChar String
+    | VUnit
+    | VArray (Array Value)
+    | VRecord (Dict String Value)
+    | VCtor { name : String, arity : Int, args : Array Value }
+    | VClosure { params : Array Pattern, body : Expr, env : Dict String Value }
+    | VAliasCtor { fields : Array String, args : Array Value }
+    | VBuiltin { name : String, need : Int, args : Array Value }
+    | VAccessor String
+
+
+type Outcome
+    = Done Value
+    | Crashed String
+    | Stuck String
+
+
+type alias Step =
+    { fuel : Int
+    , outcome : Outcome
+    }
+
+
+{-| Structural equality on first-order values. `Nothing` when a side is not
+comparable (closures, builtins, partial alias ctors) — properties discard.
+-}
+valueEq : Value -> Value -> Maybe Bool
+valueEq left right =
+    when { l = left, r = right } is
+        { l = VInt a, r = VInt b } ->
+            Just (a == b)
+
+        { l = VFloat a, r = VFloat b } ->
+            Just (a == b)
+
+        { l = VString a, r = VString b } ->
+            Just (a == b)
+
+        { l = VChar a, r = VChar b } ->
+            Just (a == b)
+
+        { l = VUnit, r = VUnit } ->
+            Just True
+
+        { l = VArray xs, r = VArray ys } ->
+            arrayEq xs ys
+
+        { l = VRecord xs, r = VRecord ys } ->
+            recordEq xs ys
+
+        { l = VCtor a, r = VCtor b } ->
+            if a.name /= b.name then
+                Just False
+
+            else
+                arrayEq a.args b.args
+
+        _ ->
+            incomparableOrFalse left right
+
+
+{-| Different first-order shapes are plainly unequal; anything involving a
+function-like value is incomparable.
+-}
+incomparableOrFalse : Value -> Value -> Maybe Bool
+incomparableOrFalse left right =
+    if isFirstOrder left && isFirstOrder right then
+        Just False
+
+    else
+        Nothing
+
+
+isFirstOrder : Value -> Bool
+isFirstOrder value =
+    when value is
+        VClosure _ ->
+            False
+
+        VBuiltin _ ->
+            False
+
+        VAliasCtor _ ->
+            False
+
+        VAccessor _ ->
+            False
+
+        VArray xs ->
+            Array.all isFirstOrder xs
+
+        VRecord fields ->
+            Array.all isFirstOrder (Dict.values fields)
+
+        VCtor c ->
+            Array.all isFirstOrder c.args
+
+        _ ->
+            True
+
+
+arrayEq : Array Value -> Array Value -> Maybe Bool
+arrayEq xs ys =
+    if Array.length xs /= Array.length ys then
+        Just False
+
+    else
+        Array.indexedMap
+            (\i x ->
+                when Array.get i ys is
+                    Just y ->
+                        valueEq x y
+
+                    Nothing ->
+                        Just False
+            )
+            xs
+            |> combineEq
+
+
+recordEq : Dict String Value -> Dict String Value -> Maybe Bool
+recordEq xs ys =
+    if Dict.keys xs /= Dict.keys ys then
+        Just False
+
+    else
+        Dict.foldl
+            (\key x acc ->
+                Array.pushLast
+                    (when Dict.get key ys is
+                        Just y ->
+                            valueEq x y
+
+                        Nothing ->
+                            Just False
+                    )
+                    acc
+            )
+            []
+            xs
+            |> combineEq
+
+
+combineEq : Array (Maybe Bool) -> Maybe Bool
+combineEq results =
+    Array.foldl
+        (\result acc ->
+            when { a = acc, r = result } is
+                { a = Just True, r = Just v } ->
+                    Just v
+
+                { a = Just False } ->
+                    Just False
+
+                _ ->
+                    Nothing
+        )
+        (Just True)
+        results
+
+
+
+-- CONTEXT (declaration tables) ------------------------------------------------
+
+
+type alias Context =
+    { ctors : Dict String Int
+    , aliasCtors : Dict String (Array String)
+    , functions : Dict String { params : Array Pattern, body : Expr }
+    }
+
+
+builtinCtorArities : Dict String Int
+builtinCtorArities =
+    Dict.empty
+        |> Dict.set "Just" 1
+        |> Dict.set "Nothing" 0
+        |> Dict.set "Ok" 1
+        |> Dict.set "Err" 1
+        |> Dict.set "True" 0
+        |> Dict.set "False" 0
+
+
+emptyContext : Context
+emptyContext =
+    { ctors = builtinCtorArities
+    , aliasCtors = Dict.empty
+    , functions = Dict.empty
+    }
+
+
+contextFromFile : File -> Context
+contextFromFile file =
+    Array.foldl addDeclaration emptyContext file.declarations
+
+
+addDeclaration : Declaration -> Context -> Context
+addDeclaration declaration context =
+    when declaration is
+        DeclCustomType custom ->
+            Array.foldl
+                (\ctor acc ->
+                    { acc
+                        | ctors =
+                            Dict.set ctor.name
+                                (Array.length ctor.arguments)
+                                acc.ctors
+                    }
+                )
+                context
+                custom.constructors
+
+        DeclAlias alias ->
+            when alias.typeAnnotation is
+                TypeRecord fields ->
+                    { context
+                        | aliasCtors =
+                            Dict.set alias.name
+                                (Array.map .name fields)
+                                context.aliasCtors
+                    }
+
+                _ ->
+                    context
+
+        DeclFunction fn ->
+            { context
+                | functions =
+                    Dict.set fn.name
+                        { params = fn.arguments, body = fn.expression }
+                        context.functions
+            }
+
+        _ ->
+            context
+
+
+
+-- EVALUATION ------------------------------------------------------------------
+
+
+{-| Evaluate a closed expression under a file's declarations.
+-}
+run : Context -> Int -> Expr -> Outcome
+run context fuel expr =
+    (evalExpr context fuel Dict.empty expr).outcome
+
+
+evalExpr : Context -> Int -> Dict String Value -> Expr -> Step
+evalExpr context fuel env expr =
+    if fuel <= 0 then
+        { fuel = 0, outcome = Stuck "fuel" }
+
+    else
+        evalExprInner context (fuel - 1) env expr
+
+
+evalExprInner : Context -> Int -> Dict String Value -> Expr -> Step
+evalExprInner context fuel env expr =
+    when expr is
+        ExprUnit ->
+            done fuel VUnit
+
+        ExprInt n ->
+            done fuel (VInt n)
+
+        ExprHex n ->
+            done fuel (VInt n)
+
+        ExprFloat f ->
+            done fuel (VFloat f)
+
+        ExprString s ->
+            done fuel (VString s)
+
+        ExprChar c ->
+            done fuel (VChar c)
+
+        ExprNegation inner ->
+            evalExpr context fuel env inner
+                |> andThenValue
+                    (\value remaining ->
+                        when value is
+                            VInt n ->
+                                done remaining (VInt (negate n))
+
+                            VFloat f ->
+                                done remaining (VFloat (negate f))
+
+                            _ ->
+                                stuck remaining "negation of non-number"
+                    )
+
+        ExprTuple items ->
+            evalMany context fuel env items
+                |> andThenValues
+                    (\values remaining ->
+                        done remaining (tupleRecord values)
+                    )
+
+        ExprList items ->
+            evalMany context fuel env items
+                |> andThenValues
+                    (\values remaining -> done remaining (VArray values))
+
+        ExprRecord fields ->
+            evalFields context fuel env fields Dict.empty
+
+        ExprUpdate { name = name, fields = fields } ->
+            when lookupName context env { moduleName = Nothing, name = name } is
+                Just (VRecord base) ->
+                    evalMany context fuel env (Array.map .value fields)
+                        |> andThenValues
+                            (\values remaining ->
+                                done remaining
+                                    (VRecord (updateFields fields values base))
+                            )
+
+                Just _ ->
+                    stuck fuel "record update of non-record"
+
+                Nothing ->
+                    stuck fuel ("unbound record in update: " ++ name)
+
+        ExprAccess { record = record, field = field } ->
+            evalExpr context fuel env record
+                |> andThenValue
+                    (\value remaining ->
+                        when value is
+                            VRecord fields ->
+                                when Dict.get field fields is
+                                    Just v ->
+                                        done remaining v
+
+                                    Nothing ->
+                                        stuck remaining ("missing field " ++ field)
+
+                            _ ->
+                                stuck remaining "access of non-record"
+                    )
+
+        ExprAccessFunction field ->
+            done fuel (VAccessor field)
+
+        ExprVar ref ->
+            when lookupName context env ref is
+                Just value ->
+                    -- zero-arg top-level bindings are param-less closures;
+                    -- force so a bare reference yields its value.
+                    forceValue context fuel value
+
+                Nothing ->
+                    stuck fuel ("unbound: " ++ refKey ref)
+
+        ExprIf { condition = condition, then_ = then_, else_ = else_ } ->
+            evalExpr context fuel env condition
+                |> andThenValue
+                    (\value remaining ->
+                        when value is
+                            VCtor { name = "True" } ->
+                                evalExpr context remaining env then_
+
+                            VCtor { name = "False" } ->
+                                evalExpr context remaining env else_
+
+                            _ ->
+                                stuck remaining "if on non-bool"
+                    )
+
+        ExprBinop op ->
+            evalBinop context fuel env op
+
+        ExprApplication exprs ->
+            when Array.popFirst exprs is
+                Just { first = headExpr, rest = argExprs } ->
+                    evalExpr context fuel env headExpr
+                        |> andThenValue
+                            (\headValue remaining ->
+                                applyMany context remaining env headValue argExprs
+                            )
+
+                Nothing ->
+                    stuck fuel "empty application"
+
+        ExprLambda { arguments = params, expression = body } ->
+            done fuel (VClosure { params = params, body = body, env = env })
+
+        ExprLet { declarations = declarations, expression = body } ->
+            evalLet context fuel env declarations body
+
+        ExprCase { expression = scrutinee, cases = cases } ->
+            evalExpr context fuel env scrutinee
+                |> andThenValue
+                    (\value remaining ->
+                        evalArms context remaining env value cases
+                    )
+
+        ExprPrefix _ ->
+            stuck fuel "prefix operator value"
+
+        ExprOperator _ ->
+            stuck fuel "bare operator"
+
+        ExprGlsl _ ->
+            stuck fuel "glsl"
+
+
+
+-- NAME LOOKUP -----------------------------------------------------------------
+
+
+lookupName : Context -> Dict String Value -> NamedRef -> Maybe Value
+lookupName context env ref =
+    when { qualified = ref.moduleName, local = Dict.get ref.name env } is
+        { qualified = Nothing, local = Just value } ->
+            Just value
+
+        _ ->
+            when builtinFor ref is
+                Just found ->
+                    Just found
+
+                Nothing ->
+                    lookupDeclared context ref.name
+
+
+lookupDeclared : Context -> String -> Maybe Value
+lookupDeclared context name =
+    when Dict.get name context.ctors is
+        Just arity ->
+            Just (VCtor { name = name, arity = arity, args = [] })
+
+        Nothing ->
+            when Dict.get name context.aliasCtors is
+                Just fields ->
+                    Just (VAliasCtor { fields = fields, args = [] })
+
+                Nothing ->
+                    when Dict.get name context.functions is
+                        Just fn ->
+                            -- param-less closures are forced at reference
+                            -- sites (see ExprVar / forceValue)
+                            Just
+                                (VClosure
+                                    { params = fn.params
+                                    , body = fn.body
+                                    , env = Dict.empty
+                                    }
+                                )
+
+                        Nothing ->
+                            Nothing
+
+
+refKey : NamedRef -> String
+refKey ref =
+    when ref.moduleName is
+        Just moduleName ->
+            moduleName ++ "." ++ ref.name
+
+        Nothing ->
+            ref.name
+
+
+builtinFor : NamedRef -> Maybe Value
+builtinFor ref =
+    when refKey ref is
+        "Array.popFirst" ->
+            builtin "Array.popFirst" 1
+
+        "Array.pushFirst" ->
+            builtin "Array.pushFirst" 2
+
+        "Maybe.map" ->
+            builtin "Maybe.map" 2
+
+        "Result.map" ->
+            builtin "Result.map" 2
+
+        "Debug.todo" ->
+            builtin "Debug.todo" 1
+
+        "String.fromInt" ->
+            builtin "String.fromInt" 1
+
+        "Basics.identity" ->
+            builtin "identity" 1
+
+        "identity" ->
+            builtin "identity" 1
+
+        _ ->
+            Nothing
+
+
+builtin : String -> Int -> Maybe Value
+builtin name need =
+    Just (VBuiltin { name = name, need = need, args = [] })
+
+
+
+-- APPLICATION -----------------------------------------------------------------
+
+
+applyMany : Context -> Int -> Dict String Value -> Value -> Array Expr -> Step
+applyMany context fuel env headValue argExprs =
+    -- Zero-arg top-level bindings arrive as param-less closures: force first.
+    forceValue context fuel headValue
+        |> andThenValue
+            (\forced remaining ->
+                when Array.popFirst argExprs is
+                    Nothing ->
+                        done remaining forced
+
+                    Just { first = argExpr, rest = restArgs } ->
+                        evalExpr context remaining env argExpr
+                            |> andThenValue
+                                (\argValue r2 ->
+                                    applyValue context r2 forced argValue
+                                        |> andThenValue
+                                            (\next r3 ->
+                                                applyMany context r3 env next restArgs
+                                            )
+                                )
+            )
+
+
+forceValue : Context -> Int -> Value -> Step
+forceValue context fuel value =
+    when value is
+        VClosure { params = [], body = body, env = closureEnv } ->
+            evalExpr context fuel closureEnv body
+
+        _ ->
+            done fuel value
+
+
+applyValue : Context -> Int -> Value -> Value -> Step
+applyValue context fuel fn arg =
+    when fn is
+        VClosure closure ->
+            when Array.popFirst closure.params is
+                Just { first = param, rest = restParams } ->
+                    when matchPattern param arg is
+                        Matched bindings ->
+                            let
+                                extended =
+                                    Dict.foldl Dict.set closure.env bindings
+                            in
+                            if Array.isEmpty restParams then
+                                evalExpr context fuel extended closure.body
+
+                            else
+                                done fuel
+                                    (VClosure
+                                        { params = restParams
+                                        , body = closure.body
+                                        , env = extended
+                                        }
+                                    )
+
+                        Unmatched ->
+                            stuck fuel "argument pattern refuted"
+
+                        MatchStuck reason ->
+                            stuck fuel reason
+
+                Nothing ->
+                    stuck fuel "application of saturated value"
+
+        VCtor ctor ->
+            if Array.length ctor.args < ctor.arity then
+                done fuel
+                    (VCtor { ctor | args = Array.pushLast arg ctor.args })
+
+            else
+                stuck fuel ("over-applied ctor " ++ ctor.name)
+
+        VAliasCtor alias ->
+            let
+                collected =
+                    Array.pushLast arg alias.args
+            in
+            if Array.length collected == Array.length alias.fields then
+                done fuel (VRecord (zipRecord alias.fields collected))
+
+            else
+                done fuel (VAliasCtor { alias | args = collected })
+
+        VAccessor field ->
+            when arg is
+                VRecord fields ->
+                    when Dict.get field fields is
+                        Just v ->
+                            done fuel v
+
+                        Nothing ->
+                            stuck fuel ("missing field " ++ field)
+
+                _ ->
+                    stuck fuel "accessor on non-record"
+
+        VBuiltin b ->
+            let
+                collected =
+                    Array.pushLast arg b.args
+            in
+            if Array.length collected == b.need then
+                runBuiltin context fuel b.name collected
+
+            else
+                done fuel (VBuiltin { b | args = collected })
+
+        _ ->
+            stuck fuel "application of non-function"
+
+
+runBuiltin : Context -> Int -> String -> Array Value -> Step
+runBuiltin context fuel name args =
+    when { name = name, args = args } is
+        { name = "identity", args = [ v ] } ->
+            done fuel v
+
+        { name = "Debug.todo", args = [ VString message ] } ->
+            { fuel = fuel, outcome = Crashed message }
+
+        { name = "Debug.todo" } ->
+            { fuel = fuel, outcome = Crashed "Debug.todo" }
+
+        { name = "String.fromInt", args = [ VInt n ] } ->
+            done fuel (VString (String.fromInt n))
+
+        { name = "Array.popFirst", args = [ VArray xs ] } ->
+            when Array.popFirst xs is
+                Just { first = first, rest = rest } ->
+                    done fuel
+                        (justValue
+                            (VRecord
+                                (Dict.empty
+                                    |> Dict.set "first" first
+                                    |> Dict.set "rest" (VArray rest)
+                                )
+                            )
+                        )
+
+                Nothing ->
+                    done fuel nothingValue
+
+        { name = "Array.pushFirst", args = [ x, VArray xs ] } ->
+            done fuel (VArray (Array.pushFirst x xs))
+
+        { name = "Maybe.map", args = [ fn, VCtor { name = "Just", args = [ payload ] } ] } ->
+            applyValue context fuel fn payload
+                |> andThenValue (\v remaining -> done remaining (justValue v))
+
+        { name = "Maybe.map", args = [ _, VCtor { name = "Nothing" } ] } ->
+            done fuel nothingValue
+
+        { name = "Result.map", args = [ fn, VCtor { name = "Ok", args = [ payload ] } ] } ->
+            applyValue context fuel fn payload
+                |> andThenValue
+                    (\v remaining ->
+                        done remaining
+                            (VCtor { name = "Ok", arity = 1, args = [ v ] })
+                    )
+
+        { name = "Result.map", args = [ _, (VCtor { name = "Err" }) as err ] } ->
+            done fuel err
+
+        _ ->
+            stuck fuel ("builtin arg shape: " ++ name)
+
+
+justValue : Value -> Value
+justValue payload =
+    VCtor { name = "Just", arity = 1, args = [ payload ] }
+
+
+nothingValue : Value
+nothingValue =
+    VCtor { name = "Nothing", arity = 0, args = [] }
+
+
+boolValue : Bool -> Value
+boolValue flag =
+    if flag then
+        VCtor { name = "True", arity = 0, args = [] }
+
+    else
+        VCtor { name = "False", arity = 0, args = [] }
+
+
+
+-- BINOPS ----------------------------------------------------------------------
+
+
+evalBinop :
+    Context
+    -> Int
+    -> Dict String Value
+    -> { operator : String, left : Expr, right : Expr }
+    -> Step
+evalBinop context fuel env op =
+    when op.operator is
+        "|>" ->
+            evalExpr context fuel env
+                (ExprApplication [ op.right, op.left ])
+
+        "<|" ->
+            evalExpr context fuel env
+                (ExprApplication [ op.left, op.right ])
+
+        "&&" ->
+            evalShortCircuit context fuel env op.left op.right False
+
+        "||" ->
+            evalShortCircuit context fuel env op.left op.right True
+
+        _ ->
+            evalExpr context fuel env op.left
+                |> andThenValue
+                    (\left remaining ->
+                        evalExpr context remaining env op.right
+                            |> andThenValue
+                                (\right r2 ->
+                                    strictBinop r2 op.operator left right
+                                )
+                    )
+
+
+evalShortCircuit :
+    Context
+    -> Int
+    -> Dict String Value
+    -> Expr
+    -> Expr
+    -> Bool
+    -> Step
+evalShortCircuit context fuel env left right shortOn =
+    evalExpr context fuel env left
+        |> andThenValue
+            (\value remaining ->
+                when value is
+                    VCtor { name = name } ->
+                        if (name == "True") == shortOn then
+                            done remaining (boolValue shortOn)
+
+                        else if name == "True" || name == "False" then
+                            evalExpr context remaining env right
+
+                        else
+                            stuck remaining "logic on non-bool"
+
+                    _ ->
+                        stuck remaining "logic on non-bool"
+            )
+
+
+strictBinop : Int -> String -> Value -> Value -> Step
+strictBinop fuel operator left right =
+    when { op = operator, l = left, r = right } is
+        { op = "+", l = VInt a, r = VInt b } ->
+            done fuel (VInt (a + b))
+
+        { op = "-", l = VInt a, r = VInt b } ->
+            done fuel (VInt (a - b))
+
+        { op = "*", l = VInt a, r = VInt b } ->
+            done fuel (VInt (a * b))
+
+        { op = "+", l = VFloat a, r = VFloat b } ->
+            done fuel (VFloat (a + b))
+
+        { op = "-", l = VFloat a, r = VFloat b } ->
+            done fuel (VFloat (a - b))
+
+        { op = "*", l = VFloat a, r = VFloat b } ->
+            done fuel (VFloat (a * b))
+
+        { op = "//", l = VInt a, r = VInt b } ->
+            -- Elm law: integer division by zero is zero.
+            done fuel
+                (VInt
+                    (if b == 0 then
+                        0
+
+                     else
+                        a // b
+                    )
+                )
+
+        { op = "++", l = VString a, r = VString b } ->
+            done fuel (VString (a ++ b))
+
+        { op = "++", l = VArray a, r = VArray b } ->
+            -- Elm order (a then b). Avoid Gren's argument-flipped
+            -- Array.append entirely; see D2 in docs/PLAN.md.
+            done fuel (VArray (concatElm a b))
+
+        { op = "::", r = VArray xs } ->
+            done fuel (VArray (Array.pushFirst left xs))
+
+        { op = "==" } ->
+            eqOutcome fuel left right identity
+
+        { op = "/=" } ->
+            eqOutcome fuel left right not
+
+        { op = "<" } ->
+            compareOutcome fuel left right (\o -> o == LT)
+
+        { op = ">" } ->
+            compareOutcome fuel left right (\o -> o == GT)
+
+        { op = "<=" } ->
+            compareOutcome fuel left right (\o -> o /= GT)
+
+        { op = ">=" } ->
+            compareOutcome fuel left right (\o -> o /= LT)
+
+        _ ->
+            stuck fuel ("binop " ++ operator)
+
+
+concatElm : Array Value -> Array Value -> Array Value
+concatElm a b =
+    Array.foldl (\x acc -> Array.pushLast x acc) a b
+
+
+eqOutcome : Int -> Value -> Value -> (Bool -> Bool) -> Step
+eqOutcome fuel left right adjust =
+    when valueEq left right is
+        Just flag ->
+            done fuel (boolValue (adjust flag))
+
+        Nothing ->
+            stuck fuel "incomparable equality"
+
+
+compareOutcome : Int -> Value -> Value -> (Order -> Bool) -> Step
+compareOutcome fuel left right accept =
+    when compareValues left right is
+        Just order ->
+            done fuel (boolValue (accept order))
+
+        Nothing ->
+            stuck fuel "incomparable ordering"
+
+
+compareValues : Value -> Value -> Maybe Order
+compareValues left right =
+    when { l = left, r = right } is
+        { l = VInt a, r = VInt b } ->
+            Just (compare a b)
+
+        { l = VFloat a, r = VFloat b } ->
+            Just (compare a b)
+
+        { l = VString a, r = VString b } ->
+            Just (compare a b)
+
+        { l = VChar a, r = VChar b } ->
+            Just (compare a b)
+
+        _ ->
+            Nothing
+
+
+
+-- LET / CASE ------------------------------------------------------------------
+
+
+evalLet :
+    Context
+    -> Int
+    -> Dict String Value
+    -> Array LetDecl
+    -> Expr
+    -> Step
+evalLet context fuel env declarations body =
+    when Array.popFirst declarations is
+        Nothing ->
+            evalExpr context fuel env body
+
+        Just { first = decl, rest = restDecls } ->
+            when decl is
+                LetFunction fn ->
+                    if Array.isEmpty fn.arguments then
+                        evalExpr context fuel env fn.expression
+                            |> andThenValue
+                                (\value remaining ->
+                                    evalLet context
+                                        remaining
+                                        (Dict.set fn.name value env)
+                                        restDecls
+                                        body
+                                )
+
+                    else
+                        evalLet context
+                            fuel
+                            (Dict.set fn.name
+                                (VClosure
+                                    { params = fn.arguments
+                                    , body = fn.expression
+                                    , env = env
+                                    }
+                                )
+                                env
+                            )
+                            restDecls
+                            body
+
+                LetDestructure destructure ->
+                    evalExpr context fuel env destructure.expression
+                        |> andThenValue
+                            (\value remaining ->
+                                when matchPattern destructure.pattern value is
+                                    Matched bindings ->
+                                        evalLet context
+                                            remaining
+                                            (Dict.foldl Dict.set env bindings)
+                                            restDecls
+                                            body
+
+                                    Unmatched ->
+                                        stuck remaining "let destructure refuted"
+
+                                    MatchStuck reason ->
+                                        stuck remaining reason
+                            )
+
+
+evalArms :
+    Context
+    -> Int
+    -> Dict String Value
+    -> Value
+    -> Array CaseArm
+    -> Step
+evalArms context fuel env value arms =
+    when Array.popFirst arms is
+        Nothing ->
+            stuck fuel "no matching arm"
+
+        Just { first = arm, rest = restArms } ->
+            when matchPattern arm.pattern value is
+                Matched bindings ->
+                    evalExpr context
+                        fuel
+                        (Dict.foldl Dict.set env bindings)
+                        arm.body
+
+                Unmatched ->
+                    evalArms context fuel env value restArms
+
+                MatchStuck reason ->
+                    stuck fuel reason
+
+
+
+-- PATTERN MATCHING ------------------------------------------------------------
+
+
+type MatchResult
+    = Matched (Dict String Value)
+    | Unmatched
+    | MatchStuck String
+
+
+matchPattern : Pattern -> Value -> MatchResult
+matchPattern pattern value =
+    when pattern is
+        PatAll ->
+            Matched Dict.empty
+
+        PatVar name ->
+            Matched (Dict.singleton name value)
+
+        PatAs inner ->
+            when matchPattern inner.pattern value is
+                Matched bindings ->
+                    Matched (Dict.set inner.name value bindings)
+
+                other ->
+                    other
+
+        PatUnit ->
+            when value is
+                VUnit ->
+                    Matched Dict.empty
+
+                _ ->
+                    Unmatched
+
+        PatInt n ->
+            matchLiteralInt n value
+
+        PatHex n ->
+            matchLiteralInt n value
+
+        PatFloat f ->
+            when value is
+                VFloat v ->
+                    boolMatch (v == f)
+
+                _ ->
+                    Unmatched
+
+        PatString s ->
+            when value is
+                VString v ->
+                    boolMatch (v == s)
+
+                _ ->
+                    Unmatched
+
+        PatChar c ->
+            when value is
+                VChar v ->
+                    boolMatch (v == c)
+
+                _ ->
+                    Unmatched
+
+        PatTuple items ->
+            when value is
+                VRecord fields ->
+                    matchTuple items fields
+
+                _ ->
+                    Unmatched
+
+        PatRecord names ->
+            when value is
+                VRecord fields ->
+                    matchRecordNames names fields
+
+                _ ->
+                    Unmatched
+
+        PatRecordBind binds ->
+            when value is
+                VRecord fields ->
+                    matchRecordBinds binds fields
+
+                _ ->
+                    Unmatched
+
+        PatList items ->
+            when value is
+                VArray xs ->
+                    if Array.length xs /= Array.length items then
+                        Unmatched
+
+                    else
+                        matchZip items xs
+
+                _ ->
+                    Unmatched
+
+        PatCons cons ->
+            when value is
+                VArray xs ->
+                    when Array.popFirst xs is
+                        Just { first = first, rest = rest } ->
+                            mergeMatches
+                                (matchPattern cons.head first)
+                                (\_ ->
+                                    matchPattern cons.tail (VArray rest)
+                                )
+
+                        Nothing ->
+                            Unmatched
+
+                _ ->
+                    Unmatched
+
+        PatNamed named ->
+            when value is
+                VCtor ctor ->
+                    if ctor.name /= named.ref.name then
+                        Unmatched
+
+                    else if Array.length ctor.args /= Array.length named.arguments then
+                        MatchStuck ("ctor arity mismatch on " ++ ctor.name)
+
+                    else
+                        matchZip named.arguments ctor.args
+
+                _ ->
+                    Unmatched
+
+
+matchLiteralInt : Int -> Value -> MatchResult
+matchLiteralInt n value =
+    when value is
+        VInt v ->
+            boolMatch (v == n)
+
+        _ ->
+            Unmatched
+
+
+boolMatch : Bool -> MatchResult
+boolMatch flag =
+    if flag then
+        Matched Dict.empty
+
+    else
+        Unmatched
+
+
+matchTuple : Array Pattern -> Dict String Value -> MatchResult
+matchTuple items fields =
+    matchZipNamed
+        (Array.indexedMap
+            (\i item -> { name = tupleField i, pattern = item })
+            items
+        )
+        fields
+
+
+matchRecordNames : Array String -> Dict String Value -> MatchResult
+matchRecordNames names fields =
+    Array.foldl
+        (\name acc ->
+            mergeMatches acc
+                (\_ ->
+                    when Dict.get name fields is
+                        Just v ->
+                            Matched (Dict.singleton name v)
+
+                        Nothing ->
+                            MatchStuck ("missing field " ++ name)
+                )
+        )
+        (Matched Dict.empty)
+        names
+
+
+matchRecordBinds :
+    Array { name : String, pattern : Pattern }
+    -> Dict String Value
+    -> MatchResult
+matchRecordBinds binds fields =
+    matchZipNamed binds fields
+
+
+matchZipNamed :
+    Array { name : String, pattern : Pattern }
+    -> Dict String Value
+    -> MatchResult
+matchZipNamed binds fields =
+    Array.foldl
+        (\bind acc ->
+            mergeMatches acc
+                (\_ ->
+                    when Dict.get bind.name fields is
+                        Just v ->
+                            matchPattern bind.pattern v
+
+                        Nothing ->
+                            MatchStuck ("missing field " ++ bind.name)
+                )
+        )
+        (Matched Dict.empty)
+        binds
+
+
+matchZip : Array Pattern -> Array Value -> MatchResult
+matchZip patterns values =
+    Array.foldl
+        (\pair acc ->
+            mergeMatches acc (\_ -> matchPattern pair.pattern pair.value)
+        )
+        (Matched Dict.empty)
+        (Array.indexedMap
+            (\i p ->
+                { pattern = p
+                , value =
+                    Array.get i values
+                        |> Maybe.withDefault VUnit
+                }
+            )
+            patterns
+        )
+
+
+mergeMatches : MatchResult -> ({} -> MatchResult) -> MatchResult
+mergeMatches first nextThunk =
+    when first is
+        Matched bindings ->
+            when nextThunk {} is
+                Matched more ->
+                    Matched (Dict.foldl Dict.set bindings more)
+
+                other ->
+                    other
+
+        other ->
+            other
+
+
+
+-- SMALL HELPERS ---------------------------------------------------------------
+
+
+done : Int -> Value -> Step
+done fuel value =
+    { fuel = fuel, outcome = Done value }
+
+
+stuck : Int -> String -> Step
+stuck fuel reason =
+    { fuel = fuel, outcome = Stuck reason }
+
+
+andThenValue : (Value -> Int -> Step) -> Step -> Step
+andThenValue continue step =
+    when step.outcome is
+        Done value ->
+            continue value step.fuel
+
+        _ ->
+            step
+
+
+evalMany : Context -> Int -> Dict String Value -> Array Expr -> Step
+evalMany context fuel env exprs =
+    evalManyHelp context fuel env exprs []
+
+
+evalManyHelp :
+    Context
+    -> Int
+    -> Dict String Value
+    -> Array Expr
+    -> Array Value
+    -> Step
+evalManyHelp context fuel env exprs acc =
+    when Array.popFirst exprs is
+        Nothing ->
+            done fuel (VArray acc)
+
+        Just { first = expr, rest = rest } ->
+            evalExpr context fuel env expr
+                |> andThenValue
+                    (\value remaining ->
+                        evalManyHelp context
+                            remaining
+                            env
+                            rest
+                            (Array.pushLast value acc)
+                    )
+
+
+{-| Continuation over evalMany results (unwraps the accumulator VArray).
+-}
+andThenValues : (Array Value -> Int -> Step) -> Step -> Step
+andThenValues continue step =
+    when step.outcome is
+        Done (VArray values) ->
+            continue values step.fuel
+
+        Done _ ->
+            { fuel = step.fuel, outcome = Stuck "internal: expected values" }
+
+        _ ->
+            step
+
+
+evalFields :
+    Context
+    -> Int
+    -> Dict String Value
+    -> Array Field
+    -> Dict String Value
+    -> Step
+evalFields context fuel env fields acc =
+    when Array.popFirst fields is
+        Nothing ->
+            done fuel (VRecord acc)
+
+        Just { first = field, rest = rest } ->
+            evalExpr context fuel env field.value
+                |> andThenValue
+                    (\value remaining ->
+                        evalFields context
+                            remaining
+                            env
+                            rest
+                            (Dict.set field.name value acc)
+                    )
+
+
+updateFields :
+    Array Field
+    -> Array Value
+    -> Dict String Value
+    -> Dict String Value
+updateFields fields values base =
+    Array.foldl
+        (\pair acc -> Dict.set pair.name pair.value acc)
+        base
+        (Array.indexedMap
+            (\i field ->
+                { name = field.name
+                , value = Array.get i values |> Maybe.withDefault VUnit
+                }
+            )
+            fields
+        )
+
+
+tupleRecord : Array Value -> Value
+tupleRecord values =
+    VRecord
+        (Array.foldl
+            (\pair acc -> Dict.set pair.name pair.value acc)
+            Dict.empty
+            (Array.indexedMap
+                (\i v -> { name = tupleField i, value = v })
+                values
+            )
+        )
+
+
+tupleField : Int -> String
+tupleField index =
+    when index is
+        0 ->
+            "first"
+
+        1 ->
+            "second"
+
+        2 ->
+            "third"
+
+        _ ->
+            "field" ++ String.fromInt index
+
+
+zipRecord : Array String -> Array Value -> Dict String Value
+zipRecord names values =
+    Array.foldl
+        (\pair acc -> Dict.set pair.name pair.value acc)
+        Dict.empty
+        (Array.indexedMap
+            (\i name ->
+                { name = name
+                , value = Array.get i values |> Maybe.withDefault VUnit
+                }
+            )
+            names
+        )

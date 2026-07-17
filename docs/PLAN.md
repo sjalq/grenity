@@ -232,7 +232,7 @@ Transforms rewrite `Ast.Types` values into `Ast.Types` values, so one evaluator 
 execute a case expression before and after a transform and compare — pure Gren, tier 0,
 no compiler in the loop.
 
-- [ ] W1.1 [M1] `src/Ast/Eval.gren`: evaluate at minimum `ExprCase`, `ExprLet`,
+- [x] W1.1 [M1] `src/Ast/Eval.gren`: evaluate at minimum `ExprCase`, `ExprLet`,
       `ExprLambda`+application, literals (Int/Float/String/Char/Bool), ctor
       application, record literal/access/update, list/array literals, and the
       call-shapes MatchCompile emits (`Array.popFirst`, `Maybe` ctors, `Debug.todo`).
@@ -476,7 +476,7 @@ DONE = M5.G and M6.G pass on the same clean commit.
 
 ## STATUS
 
-- Active milestone: **M1**. Next task: **W1.1**.
+- Active milestone: **M1**. Next task: **W1.2**.
 - 2026-07-17: Plan created from full-project audit (§6), adversarially reviewed
   (3 lenses), revised. Measured walls: npm test warm 0.75s; build warm 0.6s; canary
   19.5s -j4; pure suite ~10 min -j6 (201/202); browser ~14 min -j6 (246/252).
@@ -491,3 +491,5 @@ DONE = M5.G and M6.G pass on the same clean commit.
   W3.1 recast (destruction not speed), scripts/temp carve-outs, vacuous-proof fixes.
 - 2026-07-17 W0.1: hex fix + printer property suite + site FOUC fix + PLAN.md committed;
   tier 0 green (102 checks).
+- 2026-07-17 W1.1: Ast.Eval landed (declaration-aware, fuel-bounded, crash≠stuck≠value)
+  with 48 smoke checks; tier 0 green (150 checks).

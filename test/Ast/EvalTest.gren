@@ -1,0 +1,605 @@
+module Ast.EvalTest exposing ( tests )
+
+{-| Smoke tests for `Ast.Eval` (W1.1): one check per supported Expr/Pattern
+constructor, plus the canonicalization laws that make transform-equivalence
+properties sound (tuples ≡ first/second records, alias ctors ≡ records,
+crash ≠ stuck ≠ value). The W1.2 generator property suite builds on these.
+-}
+
+import Array exposing ( Array )
+import Ast.Eval as Eval exposing ( Outcome(..), Value(..) )
+import Ast.Types exposing
+    ( Declaration(..)
+    , Expr(..)
+    , File
+    , LetDecl(..)
+    , Pattern(..)
+    , TypeAnn(..)
+    )
+import Dict
+import Maybe exposing ( Maybe(..) )
+
+
+type alias Check =
+    { name : String
+    , passed : Bool
+    , details : String
+    }
+
+
+tests : Array Check
+tests =
+    [ literalChecks
+    , structureChecks
+    , nameAndApplicationChecks
+    , controlFlowChecks
+    , patternChecks
+    , declarationChecks
+    , outcomeSeparationChecks
+    ]
+        |> Array.flatten
+
+
+
+-- FIXTURES --------------------------------------------------------------------
+
+
+fixtureFile : File
+fixtureFile =
+    { schemaVersion = 1
+    , moduleDefinition =
+        { kind = Ast.Types.NormalModule
+        , moduleName = "Fixture"
+        , exposing_ = Ast.Types.ExposeAll
+        }
+    , comments = []
+    , imports = []
+    , declarations =
+        [ DeclCustomType
+            { name = "Shape"
+            , documentation = Nothing
+            , generics = []
+            , constructors =
+                [ { name = "Dot", arguments = [] }
+                , { name = "Line", arguments = [ TypeGeneric "a" ] }
+                , { name = "Rect"
+                  , arguments = [ TypeGeneric "a", TypeGeneric "b" ]
+                  }
+                ]
+            }
+        , DeclAlias
+            { name = "Point"
+            , documentation = Nothing
+            , generics = []
+            , typeAnnotation =
+                TypeRecord
+                    [ { name = "x", typeAnnotation = TypeGeneric "a" }
+                    , { name = "y", typeAnnotation = TypeGeneric "a" }
+                    ]
+            }
+        , DeclFunction
+            { name = "double"
+            , documentation = Nothing
+            , signature = Nothing
+            , arguments = [ PatVar "n" ]
+            , expression =
+                ExprBinop
+                    { operator = "*"
+                    , left = ExprVar { moduleName = Nothing, name = "n" }
+                    , right = ExprInt 2
+                    }
+            }
+        , DeclFunction
+            { name = "count"
+            , documentation = Nothing
+            , signature = Nothing
+            , arguments = [ PatVar "xs" ]
+            , expression =
+                ExprCase
+                    { expression = ExprVar { moduleName = Nothing, name = "xs" }
+                    , cases =
+                        [ { pattern = PatList []
+                          , body = ExprInt 0
+                          }
+                        , { pattern =
+                                PatCons { head = PatAll, tail = PatVar "rest" }
+                          , body =
+                                ExprBinop
+                                    { operator = "+"
+                                    , left = ExprInt 1
+                                    , right =
+                                        ExprApplication
+                                            [ ExprVar { moduleName = Nothing, name = "count" }
+                                            , ExprVar { moduleName = Nothing, name = "rest" }
+                                            ]
+                                    }
+                          }
+                        ]
+                    }
+            }
+        , DeclFunction
+            { name = "answer"
+            , documentation = Nothing
+            , signature = Nothing
+            , arguments = []
+            , expression = ExprInt 42
+            }
+        ]
+    }
+
+
+ctx : Eval.Context
+ctx =
+    Eval.contextFromFile fixtureFile
+
+
+fuel : Int
+fuel =
+    10000
+
+
+evalTo : String -> Expr -> Value -> Check
+evalTo name expr expected =
+    when Eval.run ctx fuel expr is
+        Done value ->
+            when Eval.valueEq value expected is
+                Just True ->
+                    ok name
+
+                _ ->
+                    fail name "value mismatch"
+
+        Crashed message ->
+            fail name ("crashed: " ++ message)
+
+        Stuck reason ->
+            fail name ("stuck: " ++ reason)
+
+
+ok : String -> Check
+ok name =
+    { name = name, passed = True, details = "" }
+
+
+fail : String -> String -> Check
+fail name details =
+    { name = name, passed = False, details = details }
+
+
+var : String -> Expr
+var name =
+    ExprVar { moduleName = Nothing, name = name }
+
+
+qvar : String -> String -> Expr
+qvar moduleName name =
+    ExprVar { moduleName = Just moduleName, name = name }
+
+
+int : Int -> Expr
+int n =
+    ExprInt n
+
+
+binop : String -> Expr -> Expr -> Expr
+binop operator left right =
+    ExprBinop { operator = operator, left = left, right = right }
+
+
+true : Value
+true =
+    VCtor { name = "True", arity = 0, args = [] }
+
+
+false : Value
+false =
+    VCtor { name = "False", arity = 0, args = [] }
+
+
+
+-- LITERALS --------------------------------------------------------------------
+
+
+literalChecks : Array Check
+literalChecks =
+    [ evalTo "ExprUnit" ExprUnit VUnit
+    , evalTo "ExprInt" (int 7) (VInt 7)
+    , evalTo "ExprHex ≡ ExprInt (D1 canary)" (ExprHex 0x61) (VInt 97)
+    , evalTo "ExprFloat" (ExprFloat 1.5) (VFloat 1.5)
+    , evalTo "ExprString" (ExprString "hi") (VString "hi")
+    , evalTo "ExprChar" (ExprChar "z") (VChar "z")
+    , evalTo "ExprNegation" (ExprNegation (int 4)) (VInt -4)
+    ]
+
+
+
+-- STRUCTURES ------------------------------------------------------------------
+
+
+structureChecks : Array Check
+structureChecks =
+    [ evalTo "ExprTuple canonicalizes to first/second record"
+        (ExprTuple [ int 1, int 2 ])
+        (VRecord
+            (Dict.empty
+                |> Dict.set "first" (VInt 1)
+                |> Dict.set "second" (VInt 2)
+            )
+        )
+    , evalTo "ExprList"
+        (ExprList [ int 1, int 2 ])
+        (VArray [ VInt 1, VInt 2 ])
+    , evalTo "ExprRecord"
+        (ExprRecord [ { name = "a", value = int 3 } ])
+        (VRecord (Dict.set "a" (VInt 3) Dict.empty))
+    , evalTo "ExprAccess"
+        (ExprAccess
+            { record = ExprRecord [ { name = "a", value = int 3 } ]
+            , field = "a"
+            }
+        )
+        (VInt 3)
+    , evalTo "ExprAccessFunction"
+        (ExprApplication
+            [ ExprAccessFunction "a"
+            , ExprRecord [ { name = "a", value = int 9 } ]
+            ]
+        )
+        (VInt 9)
+    , evalTo "ExprUpdate"
+        (ExprLet
+            { declarations =
+                [ LetFunction
+                    { name = "r"
+                    , arguments = []
+                    , expression =
+                        ExprRecord
+                            [ { name = "a", value = int 1 }
+                            , { name = "b", value = int 2 }
+                            ]
+                    }
+                ]
+            , expression =
+                ExprUpdate
+                    { name = "r"
+                    , fields = [ { name = "b", value = int 5 } ]
+                    }
+            }
+        )
+        (VRecord
+            (Dict.empty
+                |> Dict.set "a" (VInt 1)
+                |> Dict.set "b" (VInt 5)
+            )
+        )
+    ]
+
+
+
+-- NAMES + APPLICATION ---------------------------------------------------------
+
+
+nameAndApplicationChecks : Array Check
+nameAndApplicationChecks =
+    [ evalTo "ExprVar zero-arg declaration forces" (var "answer") (VInt 42)
+    , evalTo "ExprApplication of declared function"
+        (ExprApplication [ var "double", int 21 ])
+        (VInt 42)
+    , evalTo "ExprLambda + application"
+        (ExprApplication
+            [ ExprLambda
+                { arguments = [ PatVar "x" ]
+                , expression = binop "+" (var "x") (int 1)
+                }
+            , int 40
+            ]
+        )
+        (VInt 41)
+    , evalTo "curried ctor saturates across applications"
+        (ExprApplication
+            [ ExprApplication [ var "Rect", int 1 ]
+            , int 2
+            ]
+        )
+        (VCtor { name = "Rect", arity = 2, args = [ VInt 1, VInt 2 ] })
+    , evalTo "alias ctor saturates to its record (RecordAlias law)"
+        (ExprApplication [ var "Point", int 3, int 4 ])
+        (VRecord
+            (Dict.empty
+                |> Dict.set "x" (VInt 3)
+                |> Dict.set "y" (VInt 4)
+            )
+        )
+    , evalTo "Array.popFirst on non-empty (MatchCompile shape)"
+        (ExprApplication
+            [ qvar "Array" "popFirst"
+            , ExprList [ int 7, int 8 ]
+            ]
+        )
+        (VCtor
+            { name = "Just"
+            , arity = 1
+            , args =
+                [ VRecord
+                    (Dict.empty
+                        |> Dict.set "first" (VInt 7)
+                        |> Dict.set "rest" (VArray [ VInt 8 ])
+                    )
+                ]
+            }
+        )
+    , evalTo "Array.popFirst on empty"
+        (ExprApplication [ qvar "Array" "popFirst", ExprList [] ])
+        (VCtor { name = "Nothing", arity = 0, args = [] })
+    , evalTo "Maybe.map over popFirst (MatchCompile wrapper shape)"
+        (ExprApplication
+            [ qvar "Maybe" "map"
+            , qvar "Array" "popFirst"
+            , ExprApplication [ var "Just", ExprList [ int 1 ] ]
+            ]
+        )
+        (VCtor
+            { name = "Just"
+            , arity = 1
+            , args =
+                [ VCtor
+                    { name = "Just"
+                    , arity = 1
+                    , args =
+                        [ VRecord
+                            (Dict.empty
+                                |> Dict.set "first" (VInt 1)
+                                |> Dict.set "rest" (VArray [])
+                            )
+                        ]
+                    }
+                ]
+            }
+        )
+    ]
+
+
+
+-- CONTROL FLOW ----------------------------------------------------------------
+
+
+controlFlowChecks : Array Check
+controlFlowChecks =
+    [ evalTo "ExprIf true branch"
+        (ExprIf
+            { condition = binop "==" (int 1) (int 1)
+            , then_ = int 10
+            , else_ = int 20
+            }
+        )
+        (VInt 10)
+    , evalTo "ExprBinop arithmetic" (binop "*" (int 6) (int 7)) (VInt 42)
+    , evalTo "ExprBinop // by zero is zero (Elm law)"
+        (binop "//" (int 5) (int 0))
+        (VInt 0)
+    , evalTo "ExprBinop ++ keeps Elm order"
+        (binop "++" (ExprList [ int 1 ]) (ExprList [ int 2 ]))
+        (VArray [ VInt 1, VInt 2 ])
+    , evalTo "ExprBinop :: prepends"
+        (binop "::" (int 0) (ExprList [ int 1 ]))
+        (VArray [ VInt 0, VInt 1 ])
+    , evalTo "ExprBinop |> applies"
+        (binop "|>" (int 21) (var "double"))
+        (VInt 42)
+    , evalTo "&& short-circuits"
+        (binop "&&"
+            (binop "==" (int 1) (int 2))
+            (ExprApplication [ qvar "Debug" "todo", ExprString "boom" ])
+        )
+        false
+    , evalTo "ExprBinop comparison" (binop "<" (int 1) (int 2)) true
+    , evalTo "ExprLet value + destructure"
+        (ExprLet
+            { declarations =
+                [ LetFunction
+                    { name = "pair"
+                    , arguments = []
+                    , expression = ExprTuple [ int 1, int 2 ]
+                    }
+                , LetDestructure
+                    { pattern =
+                        PatRecordBind
+                            [ { name = "second", pattern = PatVar "b" } ]
+                    , expression = var "pair"
+                    }
+                ]
+            , expression = var "b"
+            }
+        )
+        (VInt 2)
+    , evalTo "top-level recursion through declarations"
+        (ExprApplication
+            [ var "count", ExprList [ int 9, int 9, int 9 ] ]
+        )
+        (VInt 3)
+    ]
+
+
+
+-- PATTERNS (via ExprCase) -----------------------------------------------------
+
+
+caseOn : Expr -> Array { pattern : Pattern, body : Expr } -> Expr
+caseOn scrutinee arms =
+    ExprCase { expression = scrutinee, cases = arms }
+
+
+patternChecks : Array Check
+patternChecks =
+    [ evalTo "PatInt / PatAll ordering"
+        (caseOn (int 2)
+            [ { pattern = PatInt 1, body = int 100 }
+            , { pattern = PatInt 2, body = int 200 }
+            , { pattern = PatAll, body = int 300 }
+            ]
+        )
+        (VInt 200)
+    , evalTo "PatHex matches by value (D1 canary)"
+        (caseOn (int 97)
+            [ { pattern = PatHex 0x61, body = int 1 }
+            , { pattern = PatAll, body = int 0 }
+            ]
+        )
+        (VInt 1)
+    , evalTo "PatVar binds"
+        (caseOn (int 5) [ { pattern = PatVar "n", body = var "n" } ])
+        (VInt 5)
+    , evalTo "PatCons peels head"
+        (caseOn (ExprList [ int 1, int 2 ])
+            [ { pattern = PatCons { head = PatVar "h", tail = PatVar "t" }
+              , body = var "h"
+              }
+            , { pattern = PatAll, body = int 0 }
+            ]
+        )
+        (VInt 1)
+    , evalTo "PatList exact arity"
+        (caseOn (ExprList [ int 1, int 2 ])
+            [ { pattern = PatList [ PatVar "a" ], body = int 0 }
+            , { pattern = PatList [ PatVar "a", PatVar "b" ]
+              , body = var "b"
+              }
+            , { pattern = PatAll, body = int -1 }
+            ]
+        )
+        (VInt 2)
+    , evalTo "PatNamed with payload"
+        (caseOn (ExprApplication [ var "Line", int 8 ])
+            [ { pattern =
+                    PatNamed
+                        { ref = { moduleName = Nothing, name = "Dot" }
+                        , arguments = []
+                        }
+              , body = int 0
+              }
+            , { pattern =
+                    PatNamed
+                        { ref = { moduleName = Nothing, name = "Line" }
+                        , arguments = [ PatVar "n" ]
+                        }
+              , body = var "n"
+              }
+            , { pattern = PatAll, body = int -1 }
+            ]
+        )
+        (VInt 8)
+    , evalTo "PatTuple matches canonical tuple record"
+        (caseOn (ExprTuple [ int 1, int 2 ])
+            [ { pattern = PatTuple [ PatVar "a", PatVar "b" ]
+              , body = var "a"
+              }
+            ]
+        )
+        (VInt 1)
+    , evalTo "PatRecord field-name binds"
+        (caseOn (ExprRecord [ { name = "x", value = int 4 } ])
+            [ { pattern = PatRecord [ "x" ], body = var "x" } ]
+        )
+        (VInt 4)
+    , evalTo "PatAs binds whole and part"
+        (caseOn (ExprList [ int 1 ])
+            [ { pattern =
+                    PatAs
+                        { pattern =
+                            PatCons { head = PatVar "h", tail = PatAll }
+                        , name = "whole"
+                        }
+              , body =
+                    binop "::" (var "h") (var "whole")
+              }
+            , { pattern = PatAll, body = ExprList [] }
+            ]
+        )
+        (VArray [ VInt 1, VInt 1 ])
+    , evalTo "PatString / PatChar"
+        (caseOn (ExprString "b")
+            [ { pattern = PatString "a", body = int 1 }
+            , { pattern = PatString "b", body = int 2 }
+            , { pattern = PatAll, body = int 3 }
+            ]
+        )
+        (VInt 2)
+    , evalTo "MatchCompile output shape: when popFirst is Just{first,rest}"
+        (caseOn
+            (ExprApplication
+                [ qvar "Array" "popFirst", ExprList [ int 5, int 6 ] ]
+            )
+            [ { pattern =
+                    PatNamed
+                        { ref = { moduleName = Nothing, name = "Just" }
+                        , arguments =
+                            [ PatRecordBind
+                                [ { name = "first", pattern = PatVar "x" }
+                                , { name = "rest", pattern = PatVar "xs" }
+                                ]
+                            ]
+                        }
+              , body = var "x"
+              }
+            , { pattern = PatAll, body = int 0 }
+            ]
+        )
+        (VInt 5)
+    ]
+
+
+
+-- DECLARATION AWARENESS -------------------------------------------------------
+
+
+declarationChecks : Array Check
+declarationChecks =
+    [ evalTo "ctor arity comes from declarations"
+        (ExprApplication [ var "Dot" ])
+        (VCtor { name = "Dot", arity = 0, args = [] })
+    , evalTo "alias ctor partial then saturated"
+        (ExprApplication
+            [ ExprApplication [ var "Point", int 1 ]
+            , int 2
+            ]
+        )
+        (VRecord
+            (Dict.empty
+                |> Dict.set "x" (VInt 1)
+                |> Dict.set "y" (VInt 2)
+            )
+        )
+    ]
+
+
+
+-- OUTCOME SEPARATION ----------------------------------------------------------
+
+
+outcomeSeparationChecks : Array Check
+outcomeSeparationChecks =
+    [ when Eval.run ctx fuel (ExprApplication [ qvar "Debug" "todo", ExprString "boom" ]) is
+        Crashed "boom" ->
+            ok "Debug.todo is Crashed, not a value"
+
+        _ ->
+            fail "Debug.todo is Crashed, not a value" "wrong outcome"
+    , when Eval.run ctx fuel (var "nope") is
+        Stuck _ ->
+            ok "unbound name is Stuck, not Crashed"
+
+        _ ->
+            fail "unbound name is Stuck, not Crashed" "wrong outcome"
+    , when Eval.run ctx 3 (ExprApplication [ var "count", ExprList [ int 1, int 1, int 1, int 1 ] ]) is
+        Stuck "fuel" ->
+            ok "fuel exhaustion is Stuck \"fuel\""
+
+        _ ->
+            fail "fuel exhaustion is Stuck \"fuel\"" "wrong outcome"
+    , when Eval.run ctx fuel (caseOn (int 9) [ { pattern = PatInt 1, body = int 0 } ]) is
+        Stuck _ ->
+            ok "non-exhaustive case is Stuck (discardable)"
+
+        _ ->
+            fail "non-exhaustive case is Stuck (discardable)" "wrong outcome"
+    ]

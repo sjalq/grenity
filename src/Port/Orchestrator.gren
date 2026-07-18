@@ -19,6 +19,7 @@ import Elm.Manifest exposing (Manifest)
 import Elm.PackageName as PackageName exposing (Name)
 import Elm.Registry as ElmRegistry
 import Elm.Semver as Semver
+import Emit.Behavior as Behavior
 import Emit.Manifest as Manifest exposing (Dependency(..), ExposedModules(..))
 import Emit.Package as PackageEmit
 import Emit.Workspace as Workspace
@@ -96,6 +97,7 @@ type alias Planned =
     , targets : Dict String String
     , packages : Array Workspace.Package
     , testModuleCount : Int
+    , rootTestModules : Array Mapping.GeneratedModule
     , diagnostics : Array Pipeline.Diagnostic
     }
 
@@ -529,6 +531,7 @@ planPackages cliOptions registry resolution drafts =
                 , targets = Dict.empty
                 , packages = []
                 , testModuleCount = totalTestModules
+                , rootTestModules = []
                 , diagnostics = []
                 }
             )
@@ -542,6 +545,9 @@ planOne cliOptions registry resolution drafts name state =
 
         rootKey =
             PackageName.toString resolution.root
+
+        isRoot =
+            key == rootKey
     in
     when Dict.get key drafts is
         Nothing ->
@@ -560,7 +566,7 @@ planOne cliOptions registry resolution drafts name state =
                 (Plan.targetName registry draft.source.manifest)
                 (Plan.inferPackagePlatform
                     cliOptions.platform
-                    (key == rootKey)
+                    isRoot
                     registry
                     draft.source.manifest
                     dependencyPlatforms
@@ -592,6 +598,14 @@ planOne cliOptions registry resolution drafts name state =
                                     }
                                     |> Result.map
                                         (\manifest ->
+                                            let
+                                                rootTests =
+                                                    if isRoot then
+                                                        draft.testModules
+
+                                                    else
+                                                        state.rootTestModules
+                                            in
                                             { identities = Dict.set key identityRecord state.identities
                                             , targets = Dict.set plannedIdentity.grenName key state.targets
                                             , packages =
@@ -603,6 +617,7 @@ planOne cliOptions registry resolution drafts name state =
                                                     }
                                                     state.packages
                                             , testModuleCount = state.testModuleCount
+                                            , rootTestModules = rootTests
                                             , diagnostics = Array.append state.diagnostics draft.diagnostics
                                             }
                                         )
@@ -665,6 +680,20 @@ finalize context permissions cliOptions output overlayPaths assets registry reso
                             , report = report
                             , validateBeforeCommit = validate
                             }
+                            |> Task.andThen
+                                (\_ ->
+                                    if cliOptions.withTests && not (Array.isEmpty planned.rootTestModules) then
+                                        emitBehaviorHarness
+                                            context.platform
+                                            permissions.fileSystem
+                                            output
+                                            rootIdentity.grenName
+                                            planned.rootTestModules
+                                            |> Task.map (\_ -> {})
+
+                                    else
+                                        Task.succeed {}
+                                )
                             |> Task.map
                                 (\_ ->
                                     { output = output
@@ -1704,6 +1733,44 @@ addReport rootIdentity libDirectory planned =
         , { key = "packageCount", value = Encode.int (Array.length planned.packages) }
         ]
         |> Encode.encode 2
+
+
+{-| Emit the behavior harness application under behavior-tests/.
+-}
+emitBehaviorHarness
+    : Node.Platform
+    -> FileSystem.Permission
+    -> Path
+    -> String
+    -> Array Mapping.GeneratedModule
+    -> Task Error {}
+emitBehaviorHarness platform fileSystem output rootGrenName testModules =
+    let
+        harnessDirPath =
+            Path.join [ output, Path.fromPosixString "behavior-tests" ]
+
+        plan =
+            Behavior.planBehaviorTests rootGrenName testModules
+    in
+    System.File.ensureDirectory fileSystem harnessDirPath
+        |> Task.andThen
+            (\_ ->
+                plan.files
+                    |> Array.foldl
+                        (\filePlan pending ->
+                            pending
+                                |> Task.andThen
+                                    (\_ ->
+                                        let
+                                            filePath =
+                                                Path.join [ harnessDirPath, Path.fromPosixString filePlan.relativePath ]
+                                        in
+                                        System.File.writeText fileSystem filePath filePlan.contents
+                                            |> Task.map (\_ -> {})
+                                    )
+                        )
+                        (Task.succeed {})
+            )
 
 
 resultTask : (problem -> Error) -> Result problem value -> Task Error value

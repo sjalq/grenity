@@ -1,0 +1,297 @@
+module Emit.Behavior exposing
+    ( FilePlan
+    , planBehaviorTests
+    )
+
+{-| Behavior harness generator.
+
+Law: root package identity + transformed test modules -> behavior-tests/ node application
+(gren.json + test sources + generated Main); pure planning, no IO here.
+
+Generates a complete runnable node application that executes the ported tests using
+gren-lang/test and Test.Runner.String. The harness imports all test modules, detects
+test declarations by scanning source text, and builds a suite to run.
+-}
+
+import Array exposing (Array)
+import Dict exposing (Dict)
+import Emit.Manifest as Manifest exposing (Dependency(..))
+import Json.Encode as Encode
+import Mapping.Types exposing (GeneratedModule)
+
+
+type alias FilePlan =
+    { relativePath : String
+    , contents : String
+    }
+
+
+type alias PlanResult =
+    { files : Array FilePlan
+    , skippedModules : Array String
+    }
+
+
+{-| Plan the behavior harness file set for a root package with test modules.
+
+Returns a record containing the generated files and any modules that had zero tests.
+Files are emitted under behavior-tests/ (not included in paths).
+
+Signature: rootGrenName -> Array GeneratedModule -> { files : Array FilePlan, skippedModules : Array String }
+-}
+planBehaviorTests : String -> Array GeneratedModule -> PlanResult
+planBehaviorTests rootGrenName testModules =
+    let
+        -- Convert test modules to source modules and detect their test declarations
+        moduleInfos =
+            testModules
+                |> Array.map (moduleToInfo rootGrenName)
+                |> Array.sortBy .moduleName
+
+        -- Detect which modules have zero tests
+        skipped =
+            moduleInfos
+                |> Array.keepIf (\info -> Array.isEmpty info.testDecls)
+                |> Array.map .moduleName
+
+        -- Build Main.gren
+        mainSource =
+            buildMain rootGrenName (Array.keepIf (\info -> not (Array.isEmpty info.testDecls)) moduleInfos)
+
+        -- Build gren.json manifest
+        manifestJson =
+            buildManifest rootGrenName
+
+        -- Combine all files
+        testModuleFiles =
+            testModules
+                |> Array.map (\module_ ->
+                    { relativePath = "src/" ++ stripTestsPrefix module_.relativePath
+                    , contents = ensureTrailingNewline module_.source
+                    }
+                )
+
+        allFiles =
+            [ { relativePath = "gren.json", contents = manifestJson }
+            , { relativePath = "src/Main.gren", contents = mainSource }
+            ]
+                ++ testModuleFiles
+    in
+    { files = allFiles
+    , skippedModules = skipped
+    }
+
+
+type alias ModuleInfo =
+    { moduleName : String
+    , relativePath : String
+    , source : String
+    , testDecls : Array String
+    }
+
+
+{-| Convert a test GeneratedModule to ModuleInfo, detecting test declarations.
+-}
+moduleToInfo : String -> GeneratedModule -> ModuleInfo
+moduleToInfo _ module_ =
+    let
+        moduleName =
+            -- derive from path: src/Foo/Bar.gren -> Foo.Bar
+            stripTestsPrefix module_.relativePath
+                |> String.dropLast (String.count ".gren")
+                |> String.replace "/" "."
+
+        testDecls =
+            detectTestDeclarations module_.source
+    in
+    { moduleName = moduleName
+    , relativePath = module_.relativePath
+    , source = module_.source
+    , testDecls = testDecls
+    }
+
+
+{-| Detect test declarations in source by scanning for lines matching
+"<name> : Test" or "<name> : Test.Test" with no leading whitespace.
+
+Comment: Uses line scan (reliable on our own canonical printer output).
+-}
+detectTestDeclarations : String -> Array String
+detectTestDeclarations source =
+    String.lines source
+        |> Array.keepIf (\line -> not (String.isEmpty (String.trimRight line)))
+        |> Array.keepIf (\line -> String.contains " : Test" line)
+        |> Array.keepIf (\line -> not (String.startsWith " " line) && not (String.startsWith "\t" line))
+        |> Array.map parseTestDeclarationName
+        |> Array.keepIf (\name -> name /= "")
+
+
+parseTestDeclarationName : String -> String
+parseTestDeclarationName line =
+    let
+        trimmed =
+            String.trimRight line
+    in
+    when String.firstIndexOf " : Test" trimmed is
+        Just colonIndex ->
+            let
+                namePart =
+                    String.slice 0 colonIndex trimmed
+                        |> String.trimRight
+            in
+            if isValidTestName namePart then
+                namePart
+
+            else
+                ""
+
+        Nothing ->
+            ""
+
+
+{-| Valid test identifier: starts with lowercase, contains only alphanumerics and _.
+-}
+isValidTestName : String -> Bool
+isValidTestName name =
+    when String.popFirst name is
+        Nothing ->
+            False
+
+        Just { first, rest } ->
+            let
+                isLowerStart =
+                    Char.isLower first || first == '_'
+
+                isValidTail =
+                    String.all (\c -> Char.isAlphaNum c || c == '_') rest
+            in
+            isLowerStart && isValidTail
+
+
+{-| Strip "tests/" prefix from relative path.
+-}
+stripTestsPrefix : String -> String
+stripTestsPrefix path =
+    if String.startsWith "tests/" path then
+        String.dropFirst (String.count "tests/") path
+
+    else
+        path
+
+
+{-| Build the Main.gren runner module.
+-}
+buildMain : String -> Array ModuleInfo -> String
+buildMain rootGrenName modules =
+    let
+        baseImports =
+            [ "module Main exposing (main)"
+            , ""
+            , "import Node"
+            , "import Random"
+            , "import Stream.Log"
+            , "import Task"
+            , "import Test"
+            , "import Test.Runner.String"
+            ]
+
+        moduleImportLines =
+            modules
+                |> Array.map (\m -> "import " ++ m.moduleName)
+                |> Array.foldr (\line acc -> [ line ] ++ acc) []
+
+        allImportLines =
+            baseImports ++ moduleImportLines
+
+        imports =
+            String.join "\n" allImportLines
+
+        suiteBody =
+            buildSuite rootGrenName modules
+
+        mainDeclaration =
+            "main : Node.SimpleProgram Never\nmain =\n    Node.defineSimpleProgram <|\n        \\environment ->\n            let\n                summary =\n                    Test.Runner.String.runWithOptions 100 (Random.initialSeed 4242) suite\n\n                headline =\n                    String.fromInt summary.passed ++ \" passed, \" ++ String.fromInt summary.failed ++ \" failed\"\n            in\n            when { failed = summary.failed, autoFail = summary.autoFail } is\n                { failed = 0, autoFail = Nothing } ->\n                    Stream.Log.line environment.stdout (\"BEHAVIOR PASS: \" ++ headline)\n                        |> Node.endSimpleProgram\n\n                _ ->\n                    Stream.Log.line environment.stderr (summary.output ++ \"\\nBEHAVIOR FAIL: \" ++ headline)\n                        |> Task.andThen (\\_ -> Node.setExitCode 1)\n                        |> Node.endSimpleProgram\n\n\nsuite : Test.Test\nsuite =\n" ++ suiteBody
+
+        fullSource =
+            imports ++ "\n\n" ++ mainDeclaration
+    in
+    ensureTrailingNewline fullSource
+
+
+{-| Build the suite definition from module test declarations.
+-}
+buildSuite : String -> Array ModuleInfo -> String
+buildSuite rootGrenName modules =
+    if Array.isEmpty modules then
+        "    Test.describe \"" ++ rootGrenName ++ " behavior\" []"
+
+    else
+        let
+            moduleDescribes =
+                modules
+                    |> Array.map buildModuleDescribe
+                    |> Array.foldr (\desc acc -> [ desc ] ++ acc) []
+                    |> String.join "\n    , "
+        in
+        "    Test.describe \"" ++ rootGrenName ++ " behavior\"\n        [ " ++ moduleDescribes ++ "\n        ]"
+
+
+{-| Build a Test.describe for a single module with its test declarations.
+-}
+buildModuleDescribe : ModuleInfo -> String
+buildModuleDescribe info =
+    let
+        tests =
+            info.testDecls
+                |> Array.map (\decl -> info.moduleName ++ "." ++ decl)
+                |> Array.foldr (\test acc -> [ test ] ++ acc) []
+                |> String.join "\n            , "
+    in
+    "Test.describe \"" ++ info.moduleName ++ "\"\n            [ " ++ tests ++ "\n            ]"
+
+
+{-| Build the gren.json manifest for the behavior harness application.
+
+The harness is an application inside the root package that can access all source
+modules (including compat adapters) via source-directories, avoiding the need to
+expose internal implementation modules.
+-}
+buildManifest : String -> String
+buildManifest _ =
+    let
+        deps =
+            Encode.object
+                [ { key = "direct"
+                  , value =
+                        Encode.object
+                            [ { key = "gren-lang/core", value = Encode.string "7.4.2" }
+                            , { key = "gren-lang/node", value = Encode.string "6.1.3" }
+                            , { key = "gren-lang/test", value = Encode.string "5.0.0" }
+                            ]
+                  }
+                , { key = "indirect"
+                  , value = Encode.object [ { key = "gren-lang/url", value = Encode.string "6.0.0" } ]
+                  }
+                ]
+
+        manifest =
+            Encode.object
+                [ { key = "type", value = Encode.string "application" }
+                , { key = "platform", value = Encode.string "node" }
+                , { key = "source-directories", value = Encode.array Encode.string [ "src", "../src" ] }
+                , { key = "gren-version", value = Encode.string "0.6.6" }
+                , { key = "dependencies", value = deps }
+                ]
+    in
+    ensureTrailingNewline (Encode.encode 4 manifest)
+
+
+{-| Ensure string ends with newline.
+-}
+ensureTrailingNewline : String -> String
+ensureTrailingNewline source =
+    if String.endsWith "\n" source then
+        source
+
+    else
+        source ++ "\n"

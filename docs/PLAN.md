@@ -212,6 +212,16 @@ Coverage and pipeline:
   commit): `Compat.Array.initialize` passed counts straight through; Gren's
   `Array.initialize` throws RangeError on negative counts where Elm returns `[]`.
   Guarded `count <= 0 -> []` in the adapter.
+- **D23 unqualified exposed-name mapping miss** (found by W4.3c's list-extra
+  harness compile, OPEN): a bare use of a catalog-mapped imported name (Fuzz
+  `list` from `exposing (list)`) survives untranslated when sibling lambdas in
+  the same declaration bind the same name (`\list ->`), while other bare uses
+  in the very same declaration map correctly (`fuzz2 (list int) (list int)` ->
+  `Fuzz.array`). The import's exposing entry IS renamed, so the port emits
+  `import Fuzz exposing (array)` + a bare `list` call = NAMING ERROR at
+  compile. Repro: ported list-extra tests/Tests.gren line 77. Root-cause is in
+  extractor name resolution or NameSub scope handling; affects any package
+  using exposing-style imports of mapped names, not just tests.
 
 ---
 
@@ -353,9 +363,16 @@ no compiler in the loop.
             the root package only; transformed test modules partitioned into
             Draft.testModules (never emitted); "Portable test modules: N" log.
             Proof: list-extra emit byte-identical with/without flag; count 1.
-      - [ ] W4.3c pipeline flag: `--with-tests` threads through CLI ->
+      - [x] W4.3c pipeline flag: `--with-tests` threads through CLI ->
             Orchestrator; test modules transformed + emitted; harness generated
             from the W4.3a template.
+            LANDED: src/Emit/Behavior.gren plans behavior-tests/ (gren.json +
+            test sources + generated Main aggregating `name : Test` decls);
+            finalize emits it when withTests && testModules non-empty. Design
+            deviation from the W4.3a recipe, deliberate: source-directories
+            ["src", "../src"] instead of a local: dep — tests may import
+            internal (non-exposed) package modules and Compat adapters, which
+            mirrors elm-test semantics. list-extra end-to-end blocked by D23.
       - [ ] W4.3d behavior verdict: run harness, parse outcome, record
             `behavior: tested|compile-only` in report + ledger.
 - [ ] W4.4 [M3] `tier 4 batch` Grow the behavior set to ≥25 curated packages (start
@@ -588,3 +605,10 @@ DONE = M5.G and M6.G pass on the same clean commit.
   Fable-validated on main): Cli flag, Acquire.testFiles, root-only ["src","tests"]
   extraction, Draft.testModules partition, test-module count in output. Baseline
   path byte-identical without the flag. Tier 0: 180 + checker; canary 14/14.
+- 2026-07-18 W4.3c: Emit.Behavior + finalize emission of behavior-tests/ harness.
+  Full 1,137-line list-extra suite ports (130 long-line Gren; content verified
+  intact, line count is a bad proof proxy). Harness compile surfaces D23
+  (bare mapped-name miss under sibling-lambda shadowing) — registered, blocks
+  the end-to-end green run. Canary false-alarm resolved: two FAILs were a stray
+  backgrounded -j1 canary racing the gren cache (D13 family), A/B confirmed
+  W4.3c innocent — 14/14 on a clean environment. Tier 0: 180 + checker.

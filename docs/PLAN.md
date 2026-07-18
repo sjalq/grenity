@@ -338,6 +338,21 @@ no compiler in the loop.
 - [ ] W4.3 [M3] Wire P3 into the port pipeline (`--with-tests`) and suite: behavior
       results recorded per-package in the ledger (`behavior: tested|compile-only`).
       Prove: tier 2 (one package end-to-end) + tier 0 (report/ledger units).
+      Split (protocol rule 2):
+      - [x] W4.3a runnable-harness spike: prove gren-lang/test executes on node
+            against ported list-extra output; committed runbook in
+            docs/test-framework-mapping.md; adversarially reproduced cold.
+            PROVEN: Test.Runner.String.runWithOptions on node, exit 0/1 both
+            verified, local: dep on ported package, fixed fuzz seed. Haiku
+            spike's "node unsupported" claim was false (missing gren-lang/node
+            dep + missing .init() call); browser/jsdom detour discarded.
+      - [ ] W4.3b extractor ports tests/: extraction includes the package's
+            tests/ dir (source-directories override on the scratch copy).
+      - [ ] W4.3c pipeline flag: `--with-tests` threads through CLI ->
+            Orchestrator; test modules transformed + emitted; harness generated
+            from the W4.3a template.
+      - [ ] W4.3d behavior verdict: run harness, parse outcome, record
+            `behavior: tested|compile-only` in report + ledger.
 - [ ] W4.4 [M3] `tier 4 batch` Grow the behavior set to ≥25 curated packages (start
       with the canary 14). Results into ledger through the §5 law.
       Prove: harvest iterations show ≥25 ledger entries `behavior: "tested"`.
@@ -559,3 +574,8 @@ DONE = M5.G and M6.G pass on the same clean commit.
   checker agent); Fable QA'd all verdicts, rewrote 2 chunks, fixed 3. D22 found and
   fixed: Compat.Array.initialize now guards count <= 0 (Gren throws RangeError where
   Elm returns []). 180 Gren checks + property-rows checker green; canary 14/14.
+- 2026-07-18 W4.3a: behavior harness PROVEN on node — gren-lang/test 5.0.0 is
+  platform-common; Test.Runner.String.runWithOptions + TestMain-shaped runner +
+  local: dep + .Gren.Main.init() bootstrap; exit 0 green / exit 1 broken both
+  verified against ported list-extra. Recipe committed in
+  docs/test-framework-mapping.md; jsdom dep (browser detour) removed.

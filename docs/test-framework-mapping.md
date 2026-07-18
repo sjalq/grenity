@@ -165,3 +165,81 @@ in `mappings/test-framework.json` (full mapping with notes on signature changes)
 The elm-community/list-extra test suite is ~95% portable at the API level.
 The remaining 5% is tuple-to-record conversion in test expected values,
 which is handled by the core transpiler's tuple compat layer.
+
+## Runnable harness recipe (W4.3a, proven on node)
+
+gren-lang/test 5.0.0 is `platform: common` (deps: core only) and runs on the
+node platform under gren 0.6.6. An earlier browser/jsdom workaround was a
+misdiagnosis: the failures came from a harness missing `gren-lang/node` in its
+dependencies and from never calling the program's `init()` (a compiled Gren
+node program only registers `module.exports.Gren.<Module>` — nothing runs
+until `.init()` is called).
+
+Per-package harness — a node APPLICATION next to the ported package:
+
+`gren.json`:
+
+    {
+        "type": "application",
+        "platform": "node",
+        "source-directories": ["src"],
+        "gren-version": "0.6.6",
+        "dependencies": {
+            "direct": {
+                "gren-lang/core": "7.4.2",
+                "gren-lang/node": "6.1.3",
+                "gren-lang/test": "5.0.0",
+                "<elm-author>/<package>": "local:<path-to-ported-package>"
+            },
+            "indirect": { "gren-lang/url": "6.0.0" }
+        }
+    }
+
+`src/Tests.gren`: the package's ported tests, exposing `suite : Test`.
+
+`src/Main.gren`: the runner (same shape as elm-to-gren's own TestMain):
+
+    module Main exposing (main)
+
+    import Node
+    import Random
+    import Stream.Log
+    import Task
+    import Test.Runner.String
+    import Tests
+
+    main : Node.SimpleProgram Never
+    main =
+        Node.defineSimpleProgram <|
+            \environment ->
+                let
+                    summary =
+                        Test.Runner.String.runWithOptions 100 (Random.initialSeed 4242) Tests.suite
+
+                    headline =
+                        String.fromInt summary.passed ++ " passed, " ++ String.fromInt summary.failed ++ " failed"
+                in
+                when { failed = summary.failed, autoFail = summary.autoFail } is
+                    { failed = 0, autoFail = Nothing } ->
+                        Stream.Log.line environment.stdout ("BEHAVIOR PASS: " ++ headline)
+                            |> Node.endSimpleProgram
+
+                    _ ->
+                        Stream.Log.line environment.stderr (summary.output ++ "\nBEHAVIOR FAIL: " ++ headline)
+                            |> Task.andThen (\_ -> Node.setExitCode 1)
+                            |> Node.endSimpleProgram
+
+Build and run:
+
+    gren make Main --output=harness.js
+    node -e "require('./harness.js').Gren.Main.init()"
+
+Verdict protocol: exit 0 + `BEHAVIOR PASS` line = `behavior: "tested"`;
+exit 1 = failures (summary.output holds the rendered diffs). `autoFail`
+catches `Test.only`/`Test.skip` abuse as failure even at zero failed count.
+`Test.Runner.String.runWithOptions : Int -> Random.Seed -> Test -> Summary`
+is pure; the seed is fixed (4242) for reproducible fuzz runs.
+
+Working example: `.test-cache/behavior-spike-node/` (6 translated list-extra
+cases incl. one fuzz over the PORTED List.Extra via a `local:` dependency;
+verified both green exit 0 and broken-test exit 1).

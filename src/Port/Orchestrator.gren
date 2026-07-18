@@ -67,6 +67,7 @@ type alias Outcome =
     { output : Path
     , rootPackage : String
     , packageCount : Int
+    , testModuleCount : Int
     , report : String
     }
 
@@ -84,6 +85,7 @@ type alias Assets =
 type alias Draft =
     { source : Acquire.PackageSource
     , modules : Array Mapping.GeneratedModule
+    , testModules : Array Mapping.GeneratedModule
     , diagnostics : Array Pipeline.Diagnostic
     , detectedPlatform : Mapping.Platform
     }
@@ -93,6 +95,7 @@ type alias Planned =
     { identities : Dict String Plan.Identity
     , targets : Dict String String
     , packages : Array Workspace.Package
+    , testModuleCount : Int
     , diagnostics : Array Pipeline.Diagnostic
     }
 
@@ -152,7 +155,7 @@ run context permissions cliOptions =
                                                                         else
                                                                             registryForRoot
                                                                 in
-                                                                transformSources context permissions cache cliOptions.offline cliOptions.namespaceModules assets transformRegistry resolution sources
+                                                                transformSources context permissions cache cliOptions.offline cliOptions.namespaceModules assets transformRegistry resolution cliOptions.withTests sources
                                                             )
                                                         |> Task.andThen
                                                             (\drafts ->
@@ -302,9 +305,10 @@ transformSources
     -> Assets
     -> Registry
     -> Resolution
+    -> Bool
     -> Dict String Acquire.PackageSource
     -> Task Error (Dict String Draft)
-transformSources context permissions cache offline namespaceModules assets registry resolution sources =
+transformSources context permissions cache offline namespaceModules assets registry resolution withTests sources =
     let
         elmHome =
             Path.join [ cache, Path.fromPosixString "elm-home" ]
@@ -313,6 +317,9 @@ transformSources context permissions cache offline namespaceModules assets regis
         -- tree under this cache. Avoids recompiling ~1MB review JS per package.
         reviewAppCache =
             Path.join [ cache, Path.fromPosixString "review-app" ]
+
+        rootName =
+            PackageName.toString resolution.root
     in
     System.File.ensureDirectory permissions.fileSystem elmHome
         |> Task.andThen
@@ -336,7 +343,7 @@ transformSources context permissions cache offline namespaceModules assets regis
                                                         ("Acquired source set is missing " ++ key ++ ".")
 
                                             Just source ->
-                                                transformOne context permissions elmHome reviewAppCache offline namespaceModules assets registry source
+                                                transformOne context permissions elmHome reviewAppCache offline namespaceModules assets registry source withTests (key == rootName)
                                                     |> Task.map (\draft -> Dict.set key draft drafts)
                                     )
                         )
@@ -354,8 +361,22 @@ transformOne
     -> Assets
     -> Registry
     -> Acquire.PackageSource
+    -> Bool
+    -> Bool
     -> Task Error Draft
-transformOne context permissions elmHome reviewAppCache offline namespaceModules assets registry source =
+transformOne context permissions elmHome reviewAppCache offline namespaceModules assets registry source withTests isRoot =
+    let
+        -- Determine which directories to review: src only, or src + tests
+        includeTests =
+            withTests && isRoot && not (Array.isEmpty source.testFiles)
+
+        reviewFiles =
+            if includeTests then
+                [ "src", "tests" ]
+
+            else
+                [ "src" ]
+    in
     Task.map2
         (\extraction sourceFiles -> { extraction = extraction, sourceFiles = sourceFiles })
         (Review.Runner.run context.platform permissions.childProcess
@@ -364,13 +385,13 @@ transformOne context permissions elmHome reviewAppCache offline namespaceModules
             , reviewConfig = assets.review
             , executable = assets.elmReviewExecutable
             , elmHome = Just elmHome
-            , files = [ "src" ]
+            , files = reviewFiles
             , offline = offline
             , reviewAppCache = Just reviewAppCache
             , fileSystem = permissions.fileSystem
             }
         )
-        (readSources permissions.fileSystem source)
+        (readSources permissions.fileSystem source includeTests)
         |> Task.andThen
             (\inputs ->
                 Pipeline.transform registry inputs.extraction inputs.sourceFiles
@@ -408,11 +429,22 @@ transformOne context permissions elmHome reviewAppCache offline namespaceModules
                                                     else
                                                         transformed.modules
 
+                                                -- Partition test modules from source modules
+                                                partitioned =
+                                                    if includeTests then
+                                                        Array.partition
+                                                            (\m -> not (String.startsWith "tests/" m.relativePath))
+                                                            portedModules
+
+                                                    else
+                                                        { trues = portedModules, falses = [] }
+
                                                 allModules =
-                                                    Array.append portedModules adapters
+                                                    Array.append partitioned.trues adapters
                                             in
                                             { source = source
                                             , modules = allModules
+                                            , testModules = partitioned.falses
                                             , diagnostics = transformed.diagnostics
                                             , detectedPlatform = detectedPlatform
                                             }
@@ -422,9 +454,17 @@ transformOne context permissions elmHome reviewAppCache offline namespaceModules
             )
 
 
-readSources : FileSystem.Permission -> Acquire.PackageSource -> Task Error (Array Pipeline.SourceFile)
-readSources permission packageSource =
-    packageSource.sourceFiles
+readSources : FileSystem.Permission -> Acquire.PackageSource -> Bool -> Task Error (Array Pipeline.SourceFile)
+readSources permission packageSource includeTests =
+    let
+        filesToRead =
+            if includeTests then
+                Array.append packageSource.sourceFiles packageSource.testFiles
+
+            else
+                packageSource.sourceFiles
+    in
+    filesToRead
         |> Array.foldl
             (\filename pending ->
                 pending
@@ -469,6 +509,14 @@ relativeSourcePath root filename =
 
 planPackages : Cli.Options -> Registry -> Resolution -> Dict String Draft -> Result Error Planned
 planPackages cliOptions registry resolution drafts =
+    let
+        -- Calculate total test modules from all drafts
+        totalTestModules =
+            drafts
+                |> Dict.values
+                |> Array.map (\draft -> Array.length draft.testModules)
+                |> Array.foldl (\count sum -> sum + count) 0
+    in
     resolution.order
         |> Array.foldl
             (\name accumulated ->
@@ -480,6 +528,7 @@ planPackages cliOptions registry resolution drafts =
                 { identities = Dict.empty
                 , targets = Dict.empty
                 , packages = []
+                , testModuleCount = totalTestModules
                 , diagnostics = []
                 }
             )
@@ -553,6 +602,7 @@ planOne cliOptions registry resolution drafts name state =
                                                     , modules = draft.modules
                                                     }
                                                     state.packages
+                                            , testModuleCount = state.testModuleCount
                                             , diagnostics = Array.append state.diagnostics draft.diagnostics
                                             }
                                         )
@@ -620,6 +670,7 @@ finalize context permissions cliOptions output overlayPaths assets registry reso
                                     { output = output
                                     , rootPackage = rootIdentity.grenName
                                     , packageCount = Array.length planned.packages
+                                    , testModuleCount = planned.testModuleCount
                                     , report = report
                                     }
                                 )
@@ -1355,6 +1406,7 @@ finalizeAdd context permissions cliOptions output assets resolution planned =
                                             { output = output
                                             , rootPackage = rootIdentity.grenName
                                             , packageCount = Array.length planned.packages
+                                            , testModuleCount = planned.testModuleCount
                                             , report = addReport rootIdentity libDirectory planned
                                             }
                                         )

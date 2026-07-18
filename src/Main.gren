@@ -111,6 +111,14 @@ runCommand environment context permissions parsed =
             Orchestrator.run context permissions options
                 |> Task.andThen
                     (\outcome ->
+                        let
+                            testModulesLine =
+                                if outcome.testModuleCount > 0 then
+                                    "\nPortable test modules: " ++ String.fromInt outcome.testModuleCount
+
+                                else
+                                    ""
+                        in
                         if options.json then
                             Stream.Log.line environment.stdout outcome.report
 
@@ -122,6 +130,7 @@ runCommand environment context permissions parsed =
                                     ++ Path.toPosixString outcome.output
                                     ++ ". Root: "
                                     ++ outcome.rootPackage
+                                    ++ testModulesLine
                                 )
                     )
                 |> Task.onError

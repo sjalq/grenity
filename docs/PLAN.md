@@ -346,8 +346,13 @@ no compiler in the loop.
             verified, local: dep on ported package, fixed fuzz seed. Haiku
             spike's "node unsupported" claim was false (missing gren-lang/node
             dep + missing .init() call); browser/jsdom detour discarded.
-      - [ ] W4.3b extractor ports tests/: extraction includes the package's
+      - [x] W4.3b extractor ports tests/: extraction includes the package's
             tests/ dir (source-directories override on the scratch copy).
+            LANDED: --with-tests flag; Acquire collects tests/*.elm into
+            PackageSource.testFiles; extraction reviews ["src","tests"] for
+            the root package only; transformed test modules partitioned into
+            Draft.testModules (never emitted); "Portable test modules: N" log.
+            Proof: list-extra emit byte-identical with/without flag; count 1.
       - [ ] W4.3c pipeline flag: `--with-tests` threads through CLI ->
             Orchestrator; test modules transformed + emitted; harness generated
             from the W4.3a template.
@@ -579,3 +584,7 @@ DONE = M5.G and M6.G pass on the same clean commit.
   local: dep + .Gren.Main.init() bootstrap; exit 0 green / exit 1 broken both
   verified against ported list-extra. Recipe committed in
   docs/test-framework-mapping.md; jsdom dep (browser detour) removed.
+- 2026-07-18 W4.3b: --with-tests plumbing landed (Haiku impl + adversarial audit,
+  Fable-validated on main): Cli flag, Acquire.testFiles, root-only ["src","tests"]
+  extraction, Draft.testModules partition, test-module count in output. Baseline
+  path byte-identical without the flag. Tier 0: 180 + checker; canary 14/14.

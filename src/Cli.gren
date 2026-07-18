@@ -40,6 +40,7 @@ type alias Options =
     , json : Bool
     , namespaceModules : Bool
     , vendor : Bool
+    , withTests : Bool
     }
 
 
@@ -59,6 +60,7 @@ type alias ParseState =
     , json : Bool
     , namespaceModules : Bool
     , vendor : Bool
+    , withTests : Bool
     }
 
 
@@ -99,6 +101,7 @@ parse defaults rawArguments =
             , json = False
             , namespaceModules = selection.vendor
             , vendor = selection.vendor
+            , withTests = False
             }
     in
     if selection.vendor then
@@ -156,6 +159,9 @@ parseArguments state arguments =
 
                 "--offline" ->
                     parseArguments { state | offline = True } rest
+
+                "--with-tests" ->
+                    parseArguments { state | withTests = True } rest
 
                 "--json" ->
                     parseArguments { state | json = True } rest
@@ -293,6 +299,7 @@ finalize state =
                     , json = state.json
                     , namespaceModules = state.namespaceModules
                     , vendor = state.vendor
+                    , withTests = state.withTests
                     }
 
 
@@ -322,6 +329,7 @@ Options:
       --platform <platform>  auto, common, browser, or node (default: auto)
       --mapping <file>       Add or override mappings; may be repeated
       --offline              Use cached registry data only
+      --with-tests           Extract and transform root package tests separately
       --json                 Print the final report as JSON
   -h, --help                 Show this help
   -v, --version              Show the tool version

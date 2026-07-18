@@ -58,6 +58,7 @@ type alias PackageSource =
     { manifest : Manifest
     , root : Path
     , sourceFiles : Array Path
+    , testFiles : Array Path
     , sourceUrl : Maybe String
     , sourceHash : Maybe String
     }
@@ -345,6 +346,7 @@ acquireLocal permission directory =
                             { manifest = loaded.manifest
                             , root = root
                             , sourceFiles = loaded.sourceFiles
+                            , testFiles = loaded.testFiles
                             , sourceUrl = Nothing
                             , sourceHash = Nothing
                             }
@@ -376,6 +378,7 @@ acquireRegistry platform permissions options name requestedVersion =
                                                     { manifest = resolved.manifest
                                                     , root = root
                                                     , sourceFiles = loaded.sourceFiles
+                                                    , testFiles = loaded.testFiles
                                                     , sourceUrl = Just resolved.endpoint.url
                                                     , sourceHash = Just resolved.endpoint.hash
                                                     }
@@ -931,7 +934,7 @@ comparePathDepth left right =
             order
 
 
-readPackageAt : FileSystem.Permission -> Path -> Task Error { manifest : Manifest, sourceFiles : Array Path }
+readPackageAt : FileSystem.Permission -> Path -> Task Error { manifest : Manifest, sourceFiles : Array Path, testFiles : Array Path }
 readPackageAt permission root =
     let
         manifestPath =
@@ -939,9 +942,12 @@ readPackageAt permission root =
 
         sourceRoot =
             Path.join [ root, Path.fromPosixString "src" ]
+
+        testRoot =
+            Path.join [ root, Path.fromPosixString "tests" ]
     in
-    Task.map2
-        (\manifest sourceFiles -> { manifest = manifest, sourceFiles = sourceFiles })
+    Task.map3
+        (\manifest sourceFiles testFiles -> { manifest = manifest, sourceFiles = sourceFiles, testFiles = testFiles })
         (System.File.readText permission manifestPath
             |> Task.andThen
                 (Manifest.decodeString
@@ -985,6 +991,16 @@ readPackageAt permission root =
                                 elmFiles
                             )
                 )
+        )
+        (System.File.listFilesRecursively permission testRoot
+            |> Task.map
+                (\allFiles ->
+                    allFiles
+                        |> Array.keepIf (\file -> String.toLower file.extension == "elm")
+                        |> Array.sortWith
+                            (\left right -> compare (Path.toPosixString left) (Path.toPosixString right))
+                )
+            |> Task.onError (\_ -> Task.succeed [])
         )
 
 

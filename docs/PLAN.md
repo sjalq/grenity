@@ -609,7 +609,15 @@ DONE = M5.G and M6.G pass on the same clean commit.
 
 ## STATUS
 
-- Active milestone: **M3**. Next: W4.4 batch drain + failure-class triage, then M3.G.
+- Active milestone: **M3**. Next: M3.G — clean-tree confirmation pass of the 26
+  tested packages, ingest behavior verdicts into ledger.json through the §5 law,
+  tier 1 green, flip to M4.
+- 2026-07-19 W4.4 COUNT MET: 26 behavior-tested packages (1,201 individual test
+  cases), 78 surveyed. 7 divergence specimens (test-failures) banked for triage:
+  elm-units 224/4, bytes-extra 37/7, nonempty-list, elm-cons, float-extra,
+  elm-trend, +1. D25 fixed (let-in-argument layout) converting array-extra 57
+  + fast-dict 121. Remaining classes: D24 (2), analogue-root W4.4h (in flight),
+  stemmer tool-crash specimen, json-value unparseable-source specimen.
 - 2026-07-18 W4.3 COMPLETE: `port <pkg> --with-tests` = ported package +
   generated harness + executed suite + verdict in report. First
   behavior-verified port: maybe-extra 30/30.

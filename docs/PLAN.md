@@ -399,9 +399,11 @@ no compiler in the loop.
             onError — the verdict is recorded, NEVER enforced; a red harness
             cannot fail the port). Report gains a "behavior" object only when
             --with-tests ran. Three-way proof matrix verified independently.
-- [ ] W4.4 [M3] `tier 4 batch` Grow the behavior set to ≥25 curated packages (start
+- [x] W4.4 [M3] `tier 4 batch` Grow the behavior set to ≥25 curated packages (start
       with the canary 14). Results into ledger through the §5 law.
       Prove: harvest iterations show ≥25 ledger entries `behavior: "tested"`.
+      DONE: 26 ledger entries behavior:"tested" (1,201 cases), ingested from a
+      single clean-tree re-stamp of all 26 at HEAD via ingest-behavior.cjs.
       Batch mechanic landed: test/ecosystem/run-behavior-batch.cjs
       (npm run ecosystem:behavior) — resumable (per-package append + startup
       compaction, last-wins per package+commit), exit-0 survey tool, JSONL log
@@ -462,9 +464,12 @@ no compiler in the loop.
             tests use community test-deps; W4.2 flagged this class. File
             under M4+ scope; elm-color parked as tests-unportable
             (test-dependency-unported).
-- [ ] M3.G [M3] **GATE M3**: Requires: W4.1–W4.4. ≥25 behavior-verified ledger
+- [x] M3.G [M3] **GATE M3**: Requires: W4.1–W4.4. ≥25 behavior-verified ledger
       entries; P2 table complete
       per W4.1's check; tier 1 green. Flip §STATUS to M4. Prove: tier 0 + tier 1.
+      PASSED 2026-07-19: 26 tested ledger entries at clean-tree HEAD (all 26
+      re-proven in one serial pass, zero flakes); P2 tag check green (19 rows);
+      tier 0 = 187 checks + property-rows; tier 1 = canary 14/14.
 
 ### W3 + W5a — Suite integrity, then close the curated suites
 
@@ -612,9 +617,13 @@ DONE = M5.G and M6.G pass on the same clean commit.
 
 ## STATUS
 
-- Active milestone: **M3**. Next: M3.G — clean-tree confirmation pass of the 26
-  tested packages, ingest behavior verdicts into ledger.json through the §5 law,
-  tier 1 green, flip to M4.
+- Active milestone: **M4** (curated closed). Next: W3.2 (deterministic suite
+  runs — the D13 version-probe/cache races now have abundant evidence), then
+  W3.3-W3.5, W5.1, W5.3, W5.4, W5.8, gate W5.5.
+- 2026-07-19 M3.G PASSED: behavior oracle live end to end. 26 packages
+  behavior-tested in the ledger (1,201 cases); 7 divergence specimens filed
+  for triage; ingest-behavior.cjs is the §5-lawful bridge from batch log to
+  ledger.
 - 2026-07-19 W4.4 COUNT MET: 26 behavior-tested packages (1,201 individual test
   cases), 78 surveyed. 7 divergence specimens (test-failures) banked for triage:
   elm-units 224/4, bytes-extra 37/7, nonempty-list, elm-cons, float-extra,

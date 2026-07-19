@@ -434,9 +434,10 @@
       "name": "NoRedInk/elm-json-decode-pipeline",
       "version": "1.0.1",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:58:24.765Z",
+      "evidence": "BEHAVIOR PASS: 10 passed, 0 failed"
     },
     {
       "name": "NoRedInk/elm-rails",
@@ -458,9 +459,10 @@
       "name": "NoRedInk/elm-simple-fuzzy",
       "version": "1.0.3",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T18:00:06.573Z",
+      "evidence": "BEHAVIOR PASS: 21 passed, 0 failed"
     },
     {
       "name": "NoRedInk/elm-sortable-table",
@@ -1388,9 +1390,10 @@
       "name": "danyx23/elm-uuid",
       "version": "2.1.2",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:59:36.358Z",
+      "evidence": "BEHAVIOR PASS: 7 passed, 0 failed"
     },
     {
       "name": "debois/elm-dom",
@@ -1516,25 +1519,28 @@
       "name": "elm-cardano/x-bytes",
       "version": "1.1.0",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:59:45.682Z",
+      "evidence": "BEHAVIOR PASS: 97 passed, 0 failed"
     },
     {
       "name": "elm-community/array-extra",
       "version": "2.6.0",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:58:29.545Z",
+      "evidence": "BEHAVIOR PASS: 57 passed, 0 failed"
     },
     {
       "name": "elm-community/basics-extra",
       "version": "4.1.0",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:58:15.893Z",
+      "evidence": "BEHAVIOR PASS: 7 passed, 0 failed"
     },
     {
       "name": "elm-community/dict-extra",
@@ -1564,9 +1570,10 @@
       "name": "elm-community/intdict",
       "version": "3.1.0",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:58:36.767Z",
+      "evidence": "BEHAVIOR PASS: 68 passed, 0 failed"
     },
     {
       "name": "elm-community/list-extra",
@@ -1588,9 +1595,10 @@
       "name": "elm-community/maybe-extra",
       "version": "5.3.0",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:58:40.972Z",
+      "evidence": "BEHAVIOR PASS: 30 passed, 0 failed"
     },
     {
       "name": "elm-community/random-extra",
@@ -1604,9 +1612,10 @@
       "name": "elm-community/result-extra",
       "version": "2.4.0",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:58:13.456Z",
+      "evidence": "BEHAVIOR PASS: 69 passed, 0 failed"
     },
     {
       "name": "elm-community/undo-redo",
@@ -1781,9 +1790,10 @@
       "name": "fredcy/elm-parseint",
       "version": "2.0.1",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T18:00:03.972Z",
+      "evidence": "BEHAVIOR PASS: 58 passed, 0 failed"
     },
     {
       "name": "fysiweb/elm-gallery",
@@ -2062,9 +2072,10 @@
       "name": "ianmackenzie/elm-1d-parameter",
       "version": "1.0.1",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:59:33.120Z",
+      "evidence": "BEHAVIOR PASS: 14 passed, 0 failed"
     },
     {
       "name": "ianmackenzie/elm-float-extra",
@@ -2184,9 +2195,10 @@
       "name": "jinjor/elm-diff",
       "version": "1.0.6",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:58:21.559Z",
+      "evidence": "BEHAVIOR PASS: 23 passed, 0 failed"
     },
     {
       "name": "jinjor/elm-map-debug",
@@ -2328,9 +2340,10 @@
       "name": "jweir/elm-iso8601",
       "version": "7.0.1",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:58:45.346Z",
+      "evidence": "BEHAVIOR PASS: 288 passed, 0 failed"
     },
     {
       "name": "jweir/sparkline",
@@ -2616,17 +2629,19 @@
       "name": "lukewestby/elm-string-interpolate",
       "version": "1.0.4",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:59:39.087Z",
+      "evidence": "BEHAVIOR PASS: 1 passed, 0 failed"
     },
     {
       "name": "lukewestby/elm-template",
       "version": "3.0.0",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:59:55.563Z",
+      "evidence": "BEHAVIOR PASS: 3 passed, 0 failed"
     },
     {
       "name": "lydell/elm-app-url",
@@ -2761,17 +2776,19 @@
       "name": "miniBill/elm-codec",
       "version": "2.3.1",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:58:53.401Z",
+      "evidence": "BEHAVIOR PASS: 67 passed, 0 failed"
     },
     {
       "name": "miniBill/elm-fast-dict",
       "version": "1.2.6",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:59:07.714Z",
+      "evidence": "BEHAVIOR PASS: 121 passed, 0 failed"
     },
     {
       "name": "miyamoen/select-list",
@@ -2993,9 +3010,10 @@
       "name": "pzp1997/assoc-list",
       "version": "1.0.0",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:59:19.681Z",
+      "evidence": "BEHAVIOR PASS: 35 passed, 0 failed"
     },
     {
       "name": "ralphtq/elm-rdf-n3-quads",
@@ -3105,9 +3123,10 @@
       "name": "rluiten/trie",
       "version": "2.1.1",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T18:00:00.842Z",
+      "evidence": "BEHAVIOR PASS: 36 passed, 0 failed"
     },
     {
       "name": "robinheghan/fnv1a",
@@ -3169,25 +3188,28 @@
       "name": "rtfeldman/elm-iso8601-date-strings",
       "version": "1.1.4",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:59:11.890Z",
+      "evidence": "BEHAVIOR PASS: 24 passed, 0 failed"
     },
     {
       "name": "rtfeldman/elm-validate",
       "version": "4.0.2",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:59:52.860Z",
+      "evidence": "BEHAVIOR PASS: 9 passed, 0 failed"
     },
     {
       "name": "ryan-haskell/date-format",
       "version": "1.0.0",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:59:26.380Z",
+      "evidence": "BEHAVIOR PASS: 66 passed, 0 failed"
     },
     {
       "name": "ryan-haskell/graphql",
@@ -3321,9 +3343,10 @@
       "name": "stil4m/structured-writer",
       "version": "1.0.3",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:59:48.767Z",
+      "evidence": "BEHAVIOR PASS: 10 passed, 0 failed"
     },
     {
       "name": "stoeffel/editable",
@@ -3465,9 +3488,10 @@
       "name": "toastal/either",
       "version": "3.6.3",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:58:09.667Z",
+      "evidence": "BEHAVIOR PASS: 10 passed, 0 failed"
     },
     {
       "name": "toastal/endo",
@@ -3505,9 +3529,10 @@
       "name": "truqu/elm-base64",
       "version": "2.0.4",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:59:15.619Z",
+      "evidence": "BEHAVIOR PASS: 40 passed, 0 failed"
     },
     {
       "name": "truqu/elm-dictset",
@@ -3649,9 +3674,10 @@
       "name": "zwilias/elm-utf-tools",
       "version": "2.0.1",
       "state": "PASS-compile-only",
-      "behavior": "compile-only",
-      "commit": "0d0ce41",
-      "date": "2026-07-15"
+      "behavior": "tested",
+      "commit": "98edbc393c344c84d8c9d5ea92306a93609f7826",
+      "date": "2026-07-19T17:59:29.748Z",
+      "evidence": "BEHAVIOR PASS: 30 passed, 0 failed"
     }
   ]
 }

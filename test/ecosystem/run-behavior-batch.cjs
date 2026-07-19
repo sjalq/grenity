@@ -10,8 +10,18 @@ const { spawnCapture, mapPool } = require("./lib/suite.cjs");
 const { gitStamp } = require("./lib/git-stamp.cjs");
 
 const root = path.resolve(__dirname, "../..");
+
+// Parse CLI flags to check for --packages before loading catalog
+let catalogPath = path.join(__dirname, "packages-canary.json");
+for (let i = 0; i < process.argv.length; i++) {
+  const a = process.argv[i];
+  if (a === "--packages" && i + 1 < process.argv.length) {
+    catalogPath = process.argv[++i];
+  }
+}
+
 const catalog = JSON.parse(
-  fs.readFileSync(path.join(__dirname, "packages-canary.json"), "utf8"),
+  fs.readFileSync(catalogPath, "utf8"),
 );
 
 /**

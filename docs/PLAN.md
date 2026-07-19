@@ -422,9 +422,21 @@ no compiler in the loop.
             "tests-broken-upstream". Prove: tier 0 (runner) + rerun log.
             LANDED; Fable tightened the relic regex to exclude qualified
             calls (Hex.toString must not classify as relic).
-      - [ ] W4.4d specimen triage: elm-codec + json-decode-pipeline NAMING
+      - [x] W4.4d specimen triage: elm-codec + json-decode-pipeline NAMING
             errors — root-cause each (may be new mapping gaps or more
             0.18 relics). Prove: recorded root cause per package here.
+            DIAGNOSED (Haiku, Fable-confirmed):
+            elm-codec = harness generator bug — Main references non-exposed
+            `: Test` decls (Fields exposes only `suite`); fix = intersect
+            detection with the module's exposing list (-> W4.4f).
+            json-decode-pipeline = mapping gap — `Expect.true`/`Expect.false`
+            dropped in gren-lang/test 5; fix = Compat.Expect wrappers over
+            pass/fail + catalog rows (-> W4.4g).
+      - [ ] W4.4f harness Main: reference only EXPOSED test decls
+            (explicit list intersect; exposing (..) = all). Prove: tier 2
+            elm-codec -> tested/test-failures.
+      - [ ] W4.4g Expect.true/false Compat adapters + catalog rows.
+            Prove: tier 2 json-decode-pipeline -> tested/test-failures.
       - D24 (list-extra, date TYPE MISMATCH) tracked in §6; needs the
         typed sortWith rewrite task, not a W4.4 bite.
       - [ ] W4.4e extend the curated list beyond canary toward >= 25 tested

@@ -567,6 +567,15 @@ no compiler in the loop.
       - [ ] W5.1d UNFINISHED RECORD (1 site): printer layout breaks inside
             the giant embedded-docs record literal (the original "embedded
             docs" suspicion — actually the smallest class).
+            PARTIAL: operator-as-value now prints parenthesized ((<|) not
+            bare <|) — real printer gap, tier-0 regression added — but the
+            ElmCore site STILL fails; the true empty-print there is
+            unidentified. Needs the emitted line 21 cut at the parse
+            position (staging retention or a doc-record minimal specimen).
+      - [ ] W5.1e NEW (surfaced by the deeper port): Vendor.Fifo references
+            generated helper `ctor_Fifo_elmToGren` that is never emitted —
+            CtorLaw multi-arg helper generation misses vendored/sub-module
+            ctor definition sites. 2 sites.
 - [x] W5.3 [M4] D12 treeview ctor-arity: root-cause the cross-package rewrite miss;
       fix. Prove: tier 2 on both treeviews + tier 1.
       DONE (with a plot twist): root cause was OUR extractor's hardcoded

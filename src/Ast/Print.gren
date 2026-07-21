@@ -716,7 +716,11 @@ printExpr locals prec expr =
             "(" ++ op ++ ")"
 
         ExprOperator op ->
-            op
+            if String.isEmpty op then
+                "()"
+
+            else
+                "(" ++ op ++ ")"
 
         ExprInt value ->
             String.fromInt value

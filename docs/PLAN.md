@@ -246,10 +246,13 @@ Coverage and pipeline:
   destroyed during this investigation. Historical corrupt copies first appeared
   ~2026-07-18 in test:apps — coinciding with node 25.9.0; elm-review 2.13.5
   post-processes compiled JS in node before writing, prime suspect. Recovery
-  paths to try: run elm-review under node <=22 (brew install node@22) to
-  regenerate a valid variant; or diff the two variants' generation inputs; or
-  upgrade elm-review. Until fixed, canary/suites are RED for packages whose
-  dep-set selects the corrupt variant.
+  RESOLVED as workaround: node@22 A/B refuted the node-version theory; byte
+  diff of the two variants showed a span deleted between exact-string anchors
+  — elm-review's lib/optimize-js.js splices hardcoded patches into compiled
+  JS and one splice corrupts against elm 0.19.1-6 output. Extractor now runs
+  with --debug (optimizer skipped entirely; we only extract JSON) plus a
+  noise-tolerant report parse (dropLeadingNoise). Proper fix upstream:
+  elm-review >2.13.5 or patched optimizer. Canary green again.
 - **D12 treeview ctor-arity ROOT-CAUSED** (fix landed in review rule, e2e proof
   blocked by D26): `namedPlatformPayloadFields` hardcoded "Node" -> {first,
   second} (stil4m/elm-syntax shape) with a bare-name guard that captured EVERY
@@ -538,8 +541,13 @@ no compiler in the loop.
       the volume set.
 - [ ] W5.1 [M4] D11 elm-review: fix the embedded-docs type-mismatch class.
       Prove: tier 2 (`--package jfmengels/elm-review@2.16.6`).
-- [ ] W5.3 [M4] D12 treeview ctor-arity: root-cause the cross-package rewrite miss;
+- [x] W5.3 [M4] D12 treeview ctor-arity: root-cause the cross-package rewrite miss;
       fix. Prove: tier 2 on both treeviews + tier 1.
+      DONE (with a plot twist): root cause was OUR extractor's hardcoded
+      payload-fields table capturing every bare `Node`; fixed as hint-with-
+      fallback. Proof was blocked by the newly-surfaced D26, which was then
+      root-caused to elm-review's JS optimizer and worked around (--debug +
+      noise-tolerant report parse). Both treeviews now port; canary 14/14.
 - [ ] W5.4 [M4] D19: elm-protocol-buffers and elm-native-modal-dialog — fix, or
       EXEMPT(broken-upstream) only with recorded upstream-build failure. elm-ionicons:
       apply the "no package is too big" rule — raise its budget or fix the scale

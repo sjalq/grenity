@@ -65,6 +65,13 @@ invokeReview platform childProcess options =
                 , "--report=json"
                 , "--extract"
                 , "--no-color"
+
+                -- D26: elm-review 2.13.5's JS optimizer splices exact-string
+                -- patches into the compiled review app; against elm 0.19.1-6
+                -- output one splice deletes a span mid-file (SyntaxError) for
+                -- some dep-set variants. --debug skips the optimizer entirely;
+                -- we only extract JSON, so app speed is irrelevant.
+                , "--debug"
                 ]
 
         arguments =
@@ -93,7 +100,7 @@ invokeReview platform childProcess options =
         }
         |> Task.andThen
             (\output ->
-                when Protocol.decode output.stdout is
+                when Protocol.decode (dropLeadingNoise output.stdout) is
                     Ok extraction ->
                         Task.succeed extraction
 
@@ -111,6 +118,36 @@ invokeReview platform childProcess options =
                         in
                         Task.fail enriched
             )
+
+
+{-| elm-review under --debug (D26) prints progress lines to stdout before the
+JSON report. The report is the first line opening a JSON object; drop
+everything above it.
+-}
+dropLeadingNoise : String -> String
+dropLeadingNoise stdout =
+    let
+        lines =
+            String.split "\n" stdout
+
+        noiseCount =
+            Array.foldl
+                (\line state ->
+                    if state.done then
+                        state
+
+                    else if String.startsWith "{" (String.trimLeft line) then
+                        { state | done = True }
+
+                    else
+                        { done = False, count = state.count + 1 }
+                )
+                { done = False, count = 0 }
+                lines
+    in
+    lines
+        |> Array.dropFirst noiseCount.count
+        |> String.join "\n"
 
 
 seedReviewApp : Node.Platform -> ChildProcess.Permission -> Options -> Task Error {}

@@ -596,8 +596,9 @@ no compiler in the loop.
         Html.Attributes.classList => Compat fn where pairs expected.
         D23-family extractor scope leak at record-update position; needs
         the same repair-law extension (BareResolve/AstEncode). Fixable.
-      - elm-ionicons: diagnosis incomplete (agent tooling fumble; ports
-        still running at wrap) — carry forward.
+      - elm-ionicons: PORTS CLEAN, verified=true (report on disk) — the
+        old timeout died with the intervening speedups. Done; "no package
+        is too big" upheld with zero exemptions.
 - [x] W5.8 [M4] D14 `add`: stage-then-commit like `port` (no partial writes); stop
       double-prefixing `Elm.`-native modules. Prove: tier 2 (`add` round-trip fixture
       into a scratch app, idempotence re-run) + tier 1.

@@ -29,6 +29,7 @@ import Ast.Types as Types exposing
     )
 import Char
 import Dict exposing ( Dict )
+import Math
 import Maybe exposing ( Maybe(..) )
 
 
@@ -1222,11 +1223,43 @@ printEmbeddedExpr locals value =
 escapeString : String -> String
 escapeString value =
     value
-        |> String.replace "\\" "\\\\"
-        |> String.replace "\"" "\\\""
-        |> String.replace "\n" "\\n"
-        |> String.replace "\t" "\\t"
-        |> String.replace "\r" "\\r"
+        |> String.split ""
+        |> Array.map escapeCharForString
+        |> String.join ""
+
+
+escapeCharForString : String -> String
+escapeCharForString ch =
+    when ch is
+        "\\" ->
+            "\\\\"
+
+        "\"" ->
+            "\\\""
+
+        "\n" ->
+            "\\n"
+
+        "\t" ->
+            "\\t"
+
+        "\r" ->
+            "\\r"
+
+        _ ->
+            when String.popFirst ch is
+                Just { first = charVal } ->
+                    let
+                        code = Char.toCode charVal
+                    in
+                    if code < 32 || code == 127 then
+                        "\\u{" ++ String.padLeft 4 '0' (intToHex code) ++ "}"
+
+                    else
+                        ch
+
+                Nothing ->
+                    ch
 
 
 escapeChar : String -> String
@@ -1248,4 +1281,54 @@ escapeChar value =
             "\\r"
 
         _ ->
-            value
+            when String.popFirst value is
+                Just { first = charVal } ->
+                    let
+                        code = Char.toCode charVal
+                    in
+                    if code < 32 || code == 127 then
+                        "\\u{" ++ String.padLeft 4 '0' (intToHex code) ++ "}"
+
+                    else
+                        value
+
+                Nothing ->
+                    value
+
+
+intToHex : Int -> String
+intToHex n =
+    if n < 16 then
+        toHexDigit n
+
+    else
+        intToHex (n // 16) ++ toHexDigit (Math.modBy 16 n)
+
+
+toHexDigit : Int -> String
+toHexDigit d =
+    if d < 10 then
+        String.fromInt d
+
+    else
+        when d is
+            10 ->
+                "A"
+
+            11 ->
+                "B"
+
+            12 ->
+                "C"
+
+            13 ->
+                "D"
+
+            14 ->
+                "E"
+
+            15 ->
+                "F"
+
+            _ ->
+                "?"

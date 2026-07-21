@@ -45,6 +45,9 @@ tests =
     , hexNeverEmitsFakeHexCodec
     , hexCharExtraAsciiCanary
     , hexPropertySuite
+    -- Unicode escape format: control chars must emit as \u{XXXX}, not \uXXXX
+    , stringWithControlCharEmitsUnicodeEscape
+    , charLiteralWithControlCharEmitsUnicodeEscape
     ]
 
 
@@ -715,6 +718,73 @@ hexNeverEmitsFakeHexCodec =
         ("emitted fake form for: "
             ++ String.join ", " (Array.map String.fromInt failures)
         )
+
+
+{-| String containing control character (ESC, code 27) must emit \u{001B} form.
+-}
+stringWithControlCharEmitsUnicodeEscape : TestResult
+stringWithControlCharEmitsUnicodeEscape =
+    let
+        -- Create a string containing ESC character (code 27)
+        escChar = Char.fromCode 27 |> String.fromChar
+        testString = "prefix" ++ escChar ++ "suffix"
+
+        file =
+            emptyFile
+                [ DeclFunction
+                    { name = "test"
+                    , documentation = Nothing
+                    , signature = Nothing
+                    , arguments = []
+                    , expression = ExprString testString
+                    }
+                ]
+
+        printed =
+            Print.print file
+
+        ok =
+            String.contains "\\u{001B}" printed
+                && not (String.contains "\\u001B" printed)
+                && not (String.contains "\\u001b" printed)
+    in
+    outcome
+        "string with control char emits \\u{001B} format"
+        ok
+        ("printed:\n" ++ printed)
+
+
+{-| Char literal with control character (ESC, code 27) must emit \u{001B} form.
+-}
+charLiteralWithControlCharEmitsUnicodeEscape : TestResult
+charLiteralWithControlCharEmitsUnicodeEscape =
+    let
+        -- Create a pattern/literal with ESC character (code 27)
+        escChar = Char.fromCode 27 |> String.fromChar
+
+        file =
+            emptyFile
+                [ DeclFunction
+                    { name = "test"
+                    , documentation = Nothing
+                    , signature = Nothing
+                    , arguments = []
+                    , expression = ExprChar escChar
+                    }
+                ]
+
+        printed =
+            Print.print file
+
+        ok =
+            String.contains "\\u{001B}" printed
+                && not (String.contains "\\u001B" printed)
+                && not (String.contains "\\u001b" printed)
+    in
+    outcome
+        "char with control char emits \\u{001B} format"
+        ok
+        ("printed:\n" ++ printed)
 
 
 {-| Property suite over a deterministic integer domain.

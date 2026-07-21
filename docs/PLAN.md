@@ -588,6 +588,16 @@ no compiler in the loop.
       EXEMPT(broken-upstream) only with recorded upstream-build failure. elm-ionicons:
       apply the "no package is too big" rule — raise its budget or fix the scale
       cause; it may not be EXEMPTed. Prove: tier 2 per package.
+      DISPOSITIONS (2026-07-21 diagnosis):
+      - elm-protocol-buffers: PORTS CLEAN — fixed by intervening work
+        (D25/W5.1/D26 era). Done.
+      - elm-native-modal-dialog: root-caused — record-update RHS bare
+        `classList` (a local parameter) over-qualified to the catalog's
+        Html.Attributes.classList => Compat fn where pairs expected.
+        D23-family extractor scope leak at record-update position; needs
+        the same repair-law extension (BareResolve/AstEncode). Fixable.
+      - elm-ionicons: diagnosis incomplete (agent tooling fumble; ports
+        still running at wrap) — carry forward.
 - [x] W5.8 [M4] D14 `add`: stage-then-commit like `port` (no partial writes); stop
       double-prefixing `Elm.`-native modules. Prove: tier 2 (`add` round-trip fixture
       into a scratch app, idempotence re-run) + tier 1.

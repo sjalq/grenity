@@ -199,6 +199,23 @@ function ledgerSection(proof) {
   }
   console.log(`  coverage: ${coverage}`);
 
+  // D8 residual (W3.5 decision, Option B): volume-classified packages are
+  // verified RAW — gren-format costs ~9.5 min on the largest specimen
+  // (jfmengels/elm-review, measured 2026-07-21) vs the <60s Option-A bar.
+  // Surface the class size from the latest suite proofs so the two-artifact
+  // reality is never invisible.
+  const volumeCounts = [];
+  for (const suite of ["pure", "browser"]) {
+    const results = proof?.suites?.[suite]?.results || [];
+    const n = results.filter((r) => r.volume && r.volume.volume).length;
+    if (n > 0) volumeCounts.push(`${n} ${suite}`);
+  }
+  console.log(
+    `  D8 residual: volume packages verified raw (format skipped): ${
+      volumeCounts.length > 0 ? volumeCounts.join(", ") : "none in loaded proofs"
+    }`,
+  );
+
   // STALE law: entry.commit predates the last commit touching src/.
   const git = makeGitResolver(root);
   const lastSrc = git.lastSrcChangeCommit();

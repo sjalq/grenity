@@ -537,11 +537,17 @@ no compiler in the loop.
       `test/ecosystem/lib/volume.test.cjs` (tier-0 node test). Prove: tier 0.
       DONE: budget-size excuse removed from classifyTimeout; explicit
       3-row decision table + unit checks wired into test:ledger.
-- [ ] W3.5 [M4] D8: close the volume double-standard. Preferred: profile gren-format
+- [x] W3.5 [M4] D8: close the volume double-standard. Preferred: profile gren-format
       on the elm-review corpus and make it fast enough to never skip. Acceptable
       fallback: verify both raw and formatted artifacts for non-volume so classes
       converge, and surface the residual gap in `ecosystem:status`. Prove: tier 2 on
       the volume set.
+      DECIDED Option B on measured numbers (2026-07-21, warm caches, format
+      FORCED): elm-syntax 74s total, elm-review 574s total vs ~20-70s
+      unformatted — the <60s Option-A bar missed by ~9×. Skip retained;
+      `ecosystem:status` now prints the "D8 residual: volume packages
+      verified raw" count from loaded suite proofs. gren-format performance
+      itself is the long-term fix (W6.5 territory).
 - [ ] W5.1 [M4] D11 elm-review: fix the embedded-docs type-mismatch class.
       Prove: tier 2 (`--package jfmengels/elm-review@2.16.6`).
       CENSUS DONE (2026-07-21, full port log): only 4 classes / 6 sites:

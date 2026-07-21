@@ -11,6 +11,7 @@
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
 const { gitStamp, proofPath } = require("./git-stamp.cjs");
 const {
   scanPackageDirectory,
@@ -18,6 +19,86 @@ const {
   adaptiveTimeoutMs,
   classifyTimeout,
 } = require("./volume.cjs");
+
+/**
+ * Transient race signatures that indicate a retry should be attempted.
+ * Used by retryOnce and environment override RETRY_SIGNATURES.
+ */
+const TRANSIENT_RETRY_PATTERNS = [
+  /unzip exited with code 80/,
+  /ENOTEMPTY/,
+  /shasum exited with code 1/,
+  /invalid version string/,
+];
+
+/**
+ * Get retry patterns from environment or use defaults.
+ */
+function getRetryPatterns() {
+  const envOverride = process.env.RETRY_SIGNATURES;
+  if (envOverride) {
+    try {
+      return [new RegExp(envOverride)];
+    } catch {
+      console.warn(`[suite] invalid RETRY_SIGNATURES regex: ${envOverride}`);
+      return TRANSIENT_RETRY_PATTERNS;
+    }
+  }
+  return TRANSIENT_RETRY_PATTERNS;
+}
+
+/**
+ * Check if a result (stderr) matches any retryable pattern.
+ */
+function isRetryable(stderr) {
+  const patterns = getRetryPatterns();
+  const text = stderr || "";
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+/**
+ * Extract a short signature from stderr for logging.
+ */
+function getRetrySignature(stderr) {
+  const patterns = getRetryPatterns();
+  const text = stderr || "";
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      return match[0].substring(0, 40);
+    }
+  }
+  return "unknown";
+}
+
+/**
+ * Run fn once; if result is retryable, run exactly once more.
+ * Returns { result, retried: false } or { result, retried: true, firstFailure: <sig> }
+ */
+async function retryOnce(fn) {
+  const first = await fn();
+  const combinedOutput = `${first.stderr || ""}\n${first.stdout || ""}`;
+  if (first.status !== 0 && isRetryable(combinedOutput)) {
+    const sig = getRetrySignature(combinedOutput);
+    const second = await fn();
+    return {
+      result: second,
+      retried: true,
+      firstFailure: sig,
+    };
+  }
+  return { result: first, retried: false };
+}
+
+/**
+ * Calculate memory-capped concurrency.
+ * Returns min(requested, max(1, floor(os.freemem() / (1.5 * 1024**3))))
+ */
+function defaultConcurrency(requested = 1) {
+  const freeMem = os.freemem();
+  const maxFromMem = Math.max(1, Math.floor(freeMem / (1.5 * 1024 ** 3)));
+  return Math.min(requested, maxFromMem);
+}
 
 /**
  * Parse suite CLI flags from process.argv.
@@ -62,6 +143,16 @@ function parseSuiteArgs(argv = process.argv.slice(2)) {
   if (!Number.isFinite(opts.timeoutMs) || opts.timeoutMs < 1000) {
     opts.timeoutMs = 120000;
   }
+
+  const requested = opts.concurrency;
+  const clamped = defaultConcurrency(opts.concurrency);
+  if (clamped < requested) {
+    console.log(
+      `[suite] memory-capped concurrency: -j${requested} clamped to -j${clamped}`,
+    );
+    opts.concurrency = clamped;
+  }
+
   return opts;
 }
 
@@ -197,11 +288,8 @@ async function runSuite(options) {
     process.stdout.write(
       `[${index + 1}/${filtered.packages.length}] port ${label}${volNote} ... `,
     );
-    const result = await spawnCapture(
-      process.execPath,
-      cliArgs,
-      root,
-      budgetMs,
+    const { result, retried, firstFailure } = await retryOnce(
+      () => spawnCapture(process.execPath, cliArgs, root, budgetMs),
     );
     const ms = Date.now() - started;
 
@@ -233,7 +321,7 @@ async function runSuite(options) {
             : "") +
           `)`,
       );
-      results.push({
+      const resultEntry = {
         package: label,
         status: "fail",
         ms,
@@ -242,19 +330,30 @@ async function runSuite(options) {
         reason,
         volume: volumeAfter,
         budgetMs,
-      });
+      };
+      if (retried) {
+        resultEntry.retried = true;
+        resultEntry.firstFailure = firstFailure;
+      }
+      results.push(resultEntry);
       if (args.failFast) stop = true;
     } else if (result.status === 0 && verified) {
+      const retryNote = retried ? ` (retried: ${firstFailure})` : "";
       console.log(
-        `ok (${ms}ms)` +
+        `ok (${ms}ms)${retryNote}` +
           (volumeAfter && volumeAfter.volume ? " [volume]" : ""),
       );
-      results.push({
+      const resultEntry = {
         package: label,
         status: "ok",
         ms,
         volume: volumeAfter && volumeAfter.volume ? volumeAfter : undefined,
-      });
+      };
+      if (retried) {
+        resultEntry.retried = true;
+        resultEntry.firstFailure = firstFailure;
+      }
+      results.push(resultEntry);
     } else {
       failed += 1;
       const reason = classifyFail(text, result.status, verified);
@@ -264,14 +363,19 @@ async function runSuite(options) {
       if (tail) {
         console.log(tail);
       }
-      results.push({
+      const resultEntry = {
         package: label,
         status: "fail",
         ms,
         exit: result.status,
         verified,
         reason,
-      });
+      };
+      if (retried) {
+        resultEntry.retried = true;
+        resultEntry.firstFailure = firstFailure;
+      }
+      results.push(resultEntry);
       if (args.failFast) {
         stop = true;
       }
@@ -613,4 +717,6 @@ module.exports = {
   selectPackages,
   mapPool,
   spawnCapture,
+  retryOnce,
+  defaultConcurrency,
 };

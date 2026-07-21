@@ -6,7 +6,7 @@
  */
 const path = require("node:path");
 const fs = require("node:fs");
-const { spawnCapture, mapPool } = require("./lib/suite.cjs");
+const { spawnCapture, mapPool, retryOnce, defaultConcurrency } = require("./lib/suite.cjs");
 const { gitStamp } = require("./lib/git-stamp.cjs");
 
 const root = path.resolve(__dirname, "../..");
@@ -82,6 +82,16 @@ for (let i = 0; i < process.argv.length; i++) {
   } else if (a === "--package" && i + 1 < process.argv.length) {
     args.package = process.argv[++i];
   }
+}
+
+// Memory-capped concurrency
+const requested = args.concurrency;
+const clamped = defaultConcurrency(args.concurrency);
+if (clamped < requested) {
+  console.log(
+    `[behavior-batch] memory-capped concurrency: -j${requested} clamped to -j${clamped}`,
+  );
+  args.concurrency = clamped;
 }
 
 const cache = path.join(root, ".test-cache", "ecosystem", "cache");
@@ -163,7 +173,9 @@ mapPool(packages, args.concurrency, async (pkg, index) => {
 
   process.stdout.write(`[${index + 1}/${packages.length}] ${label} ... `);
   const started = Date.now();
-  const result = await spawnCapture(process.execPath, cliArgs, root);
+  const { result, retried, firstFailure } = await retryOnce(
+    () => spawnCapture(process.execPath, cliArgs, root),
+  );
   const ms = Date.now() - started;
 
   let status = "port-failed";
@@ -212,17 +224,19 @@ mapPool(packages, args.concurrency, async (pkg, index) => {
 
   // Append immediately: a killed batch must never lose completed verdicts
   // (startup compaction collapses any duplicate from an overlapping rerun).
-  fs.appendFileSync(
-    logPath,
-    JSON.stringify({
-      name: pkg.name,
-      version: pkg.version,
-      status,
-      detail,
-      commit: stamp.commit,
-      date: new Date().toISOString(),
-    }) + "\n",
-  );
+  const logEntry = {
+    name: pkg.name,
+    version: pkg.version,
+    status,
+    detail,
+    commit: stamp.commit,
+    date: new Date().toISOString(),
+  };
+  if (retried) {
+    logEntry.retried = true;
+    logEntry.firstFailure = firstFailure;
+  }
+  fs.appendFileSync(logPath, JSON.stringify(logEntry) + "\n");
 
   results.push({
     name: pkg.name,

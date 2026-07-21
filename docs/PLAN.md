@@ -488,10 +488,18 @@ no compiler in the loop.
       0.6s warm build; this task is about destruction, not speed.) Prove: tier 0 +
       manual check: run `npm run build` while a `--package` port is in flight, port
       survives.
-- [ ] W3.2 [M4] D13: deterministic suite runs — cap child concurrency by available
+- [x] W3.2 [M4] D13: deterministic suite runs — cap child concurrency by available
       memory; one recorded retry for `exit-1` (visible in proof JSON, never silent).
       Prove: tier 2 — a named 6-package concurrent set including elm-ui at `-j6`, 3×
       consecutive green.
+      DONE in four layers: (a) acquire cache adopts race winners (unique
+      staging, tolerated renames, no-prompt unzip) — 8-way cold-cache race
+      test green; (b) recorded retry on race signatures in all three runners
+      (retried:true + firstFailure in proof JSON); (c) memory clamp law
+      corrected to totalmem/3GB floor 2 (freemem collapses to -j1 on macOS —
+      the "-j6" proofs were secretly serial until caught); (d) the version
+      probe retries ×3 internally (starved `gren --version` under -j5 was the
+      last flake). Proof: elm-ui set at true -j5, rounds 2-4 consecutive 6/6.
 - [ ] W3.3 [M4] D7: package verify always runs `gren docs` (drop the `make Main`
       success short-circuit or run both). Prove: tier 1.
 - [ ] W3.4 [M4] D9: only volume-classified packages may classify `scale`; a non-volume

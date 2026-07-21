@@ -1013,8 +1013,18 @@ firstExistingBinary platform permission candidates fallback =
                     )
 
 
+{-| The probe is bookkeeping, not verification: under full suite
+concurrency `gren --version` gets starved and emits nothing (observed
+live at -j5), so a single failed attempt must never kill a port.
+Three attempts before giving up.
+-}
 compilerVersion : Node.Platform -> ChildProcess.Permission -> String -> Task Error String
 compilerVersion platform permission executable =
+    compilerVersionAttempt platform permission executable 3
+
+
+compilerVersionAttempt : Node.Platform -> ChildProcess.Permission -> String -> Int -> Task Error String
+compilerVersionAttempt platform permission executable attemptsLeft =
     System.Process.run permission
         { program = executable
         , arguments = [ "--version" ]
@@ -1036,6 +1046,14 @@ compilerVersion platform permission executable =
 
                     Err _ ->
                         Task.fail (PortError.create "GREN_VERIFY_FAILED" "Gren returned an invalid version string.")
+            )
+        |> Task.onError
+            (\probeError ->
+                if attemptsLeft > 1 then
+                    compilerVersionAttempt platform permission executable (attemptsLeft - 1)
+
+                else
+                    Task.fail probeError
             )
 
 

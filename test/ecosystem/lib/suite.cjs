@@ -91,12 +91,14 @@ async function retryOnce(fn) {
 }
 
 /**
- * Calculate memory-capped concurrency.
- * Returns min(requested, max(1, floor(os.freemem() / (1.5 * 1024**3))))
+ * Memory-capped concurrency. TOTAL memory is the basis, not freemem:
+ * macOS reports cache-held RAM as used, so freemem-based caps collapse
+ * every run to -j1 (observed live: "-j6 clamped to -j1" on a 16GB idle
+ * machine). Law: one port worker per 3GB of machine, floor 2.
  */
 function defaultConcurrency(requested = 1) {
-  const freeMem = os.freemem();
-  const maxFromMem = Math.max(1, Math.floor(freeMem / (1.5 * 1024 ** 3)));
+  const totalMem = os.totalmem();
+  const maxFromMem = Math.max(2, Math.floor(totalMem / (3 * 1024 ** 3)));
   return Math.min(requested, maxFromMem);
 }
 

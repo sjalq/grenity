@@ -561,6 +561,9 @@ no compiler in the loop.
       - [ ] W5.1c TYPE MISMATCH (1 site, ModuleNameLookupTable.Internal):
             Dict.set key via toRangeLike — D24-family comparability under
             tuple lowering.
+            BLOCKED: this is one site of D24 (tuple-as-Dict-key needs the
+            type-directed rewrite); resolving it here would be a one-off
+            hack. Closes with D24.
       - [ ] W5.1d UNFINISHED RECORD (1 site): printer layout breaks inside
             the giant embedded-docs record literal (the original "embedded
             docs" suspicion — actually the smallest class).

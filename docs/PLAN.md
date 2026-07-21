@@ -547,6 +547,13 @@ no compiler in the loop.
       - [ ] W5.1b NAMING ERROR `newFixes` (3 sites, 2 modules): a binding
             vanished — suspect rename/binder pass dropping a let/lambda
             name (Review.Error.Fixes).
+            DIAGNOSED (Fable, from source): MatchCompile D3/D4-sibling —
+            ctor payload matched by `Edit []` in one arm and whole-list var
+            `Edit newFixes` in the next; the peel merge drops the var
+            binding while the arm body still references it. Repro shape:
+            case fixes of Remove -> …; Edit [] -> …; Edit newFixes -> …
+            Fix guardrails: EvalPropTest 240 cases + a new deterministic
+            fixture of exactly this shape asserting agreement.
       - [ ] W5.1c TYPE MISMATCH (1 site, ModuleNameLookupTable.Internal):
             Dict.set key via toRangeLike — D24-family comparability under
             tuple lowering.

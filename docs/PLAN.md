@@ -352,6 +352,15 @@ Coverage and pipeline:
   suite went from 0 tests ran (compile-dead) to 215/219 passing.
   The 4 fails are list-extra's own "stack safety" 10k-recursion tests
   (RangeError) — a NEW distinct class, filed as D35.
+- **D38 D35 regression: inlined fallthrough duplicates same-name binders
+  nested** (found by gate v8 pure, OPEN, fix delegated): removing the tf_
+  thunks makes each duplicated continuation re-match the scrutinee INSIDE
+  the previous arm's partial match; when consecutive source arms bind the
+  same names (elm-diff's leftX/leftY), Gren rejects the nested rebinding
+  as SHADOWING (8 sites in jinjor/elm-diff@1.0.6, which passed v6). Law:
+  alpha-rename pattern binders in duplicated continuation copies (fresh
+  deterministic suffixes + body substitution); TCO position must be kept
+  (list-extra 219/219 receipt is a required non-regression proof).
 - **D36 review-app shared cache was dead since birth** (found by the
   elm-monocle hang triage — Opus subagent, Fable-QA'd, FIXED 2026-07-22):
   seed/save hardcoded `…/cli/2.13.5` but elm-review names that segment

@@ -37,6 +37,12 @@ const TRANSIENT_RETRY_PATTERNS = [
   // spin (stale-lock steal or a long cold-compile convoy). One retry
   // lands after the queue drains.
   /EXTRACT_LOCK/,
+  // D34 git clone races on shared-dependency coordinate caches (fixed at
+  // the source via unique-partial + adopt-the-winner; kept as a net for
+  // any straggler path).
+  /shallow file has changed/,
+  /shallow\.lock/,
+  /initial ref transaction called with existing refs/,
 ];
 
 /**

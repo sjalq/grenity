@@ -255,6 +255,16 @@ Coverage and pipeline:
   Runner.gren); released on success AND failure paths; canary 14/14 at -j4
   (90s — the serialization cost, refunded later by the extract cache which
   bypasses locked extraction on hit).
+- **D34 git clone races on shared-dependency coordinate caches** (found by
+  gate v5e browser — 8 scattered exit-1s, FIXED 2026-07-22): cloneVersionTag
+  (the zipball-hash-drift fallback) cloned DIRECTLY into the shared
+  destination and pre-deleted it first; two workers whose packages share a
+  dep raced ("shallow file has changed", shallow.lock collisions, torn refs,
+  and a winner's published tree could be deleted mid-read). Fix: clone into
+  a unique .partial.<suffix> dir, publish by rename, adopt-the-winner on
+  conflict (same law extractArchive already had); destination pre-deletes
+  removed at both call sites; git race signatures added to the suite's
+  transient-retry net. Every acquisition path is now write-once.
 - **D33 fossilized per-package elm-stuff corruption in the registry cache**
   (found by gate v5b + solo instrumentation, FIXED 2026-07-22): extraction
   runs elm-review INSIDE the cached source tree under registry/packages, so

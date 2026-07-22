@@ -555,16 +555,18 @@ acquireArchive platform permissions options name version endpoint =
                 |> Task.andThen (\_ -> findPackageRoot permissions.fileSystem destination)
 
         useGitClone =
+            -- D34: destination is never pre-deleted — an existing tree is a
+            -- concurrent winner's published copy; cloneVersionTag adopts it.
             removeIfExists permissions.fileSystem archivePath
-                |> Task.andThen (\_ -> removeIfExists permissions.fileSystem destination)
                 |> Task.andThen (\_ -> cloneVersionTag platform permissions name version destination)
                 |> Task.andThen (\_ -> findPackageRoot permissions.fileSystem destination)
 
         recoverHashMismatch =
             -- Corrupt/truncated ZIP first; then permanent GitHub zipball hash
             -- drift vs package.elm-lang.org (clone the version tag).
+            -- D34: only the zip is removed; a published destination tree is
+            -- complete by construction and may be a concurrent winner's.
             removeIfExists permissions.fileSystem archivePath
-                |> Task.andThen (\_ -> removeIfExists permissions.fileSystem destination)
                 |> Task.andThen (\_ -> ensureArchive permissions options endpoint archivePath)
                 |> Task.andThen
                     (\_ ->
@@ -664,6 +666,12 @@ adoptWinnersArchive permissions archivePath tempPath moveError =
 
 {-| Clone `author/project` at an exact version tag into destination.
 Used when package.elm-lang.org endpoint SHA-1 no longer matches GitHub zipballs.
+
+D34: destination is a shared coordinate cache; concurrent workers whose
+packages share a dependency raced direct clones into it ("shallow file has
+changed", shallow.lock collisions, torn refs). Clone into a unique partial
+dir and publish by rename — adopt the winner if someone else got there first.
+An existing destination is always a fully published tree; never pre-delete.
 -}
 cloneVersionTag
     : Node.Platform
@@ -687,52 +695,80 @@ cloneVersionTag platform permissions name version destination =
         parent =
             Path.parentPath destination
 
-        destStr =
-            System.File.pathToString platform destination
+        cloneInto tempDest parentPath =
+            System.Process.run permissions.childProcess
+                { program = "git"
+                , arguments =
+                    [ "clone"
+                    , "--depth"
+                    , "1"
+                    , "--branch"
+                    , tag
+                    , "--single-branch"
+                    , "--"
+                    , cloneUrl
+                    , System.File.pathToString platform tempDest
+                    ]
+                , workingDirectory = System.File.pathToString platform parentPath
+                , environment = Dict.empty
+                , allowedExitCodes = [ 0 ]
+                , timeoutMilliseconds = 120000
+                , maximumOutputBytes = 1024 * 1024
+                }
+                |> Task.mapError
+                    (\processError ->
+                        PortError.create "SOURCE_CLONE_FAILED"
+                            ("Could not clone "
+                                ++ PackageName.toString name
+                                ++ "@"
+                                ++ tag
+                                ++ " from "
+                                ++ cloneUrl
+                                ++ ": "
+                                ++ PortError.toString processError
+                            )
+                    )
     in
     when parent is
         Nothing ->
             Task.fail (PortError.create "CACHE_INVALID" "Source clone path has no parent.")
 
         Just parentPath ->
-            System.File.ensureDirectory permissions.fileSystem parentPath
-                |> Task.andThen (\_ -> removeIfExists permissions.fileSystem destination)
+            System.File.exists permissions.fileSystem destination
                 |> Task.andThen
-                    (\_ ->
-                        System.Process.run permissions.childProcess
-                            { program = "git"
-                            , arguments =
-                                [ "clone"
-                                , "--depth"
-                                , "1"
-                                , "--branch"
-                                , tag
-                                , "--single-branch"
-                                , "--"
-                                , cloneUrl
-                                , destStr
-                                ]
-                            , workingDirectory = System.File.pathToString platform parentPath
-                            , environment = Dict.empty
-                            , allowedExitCodes = [ 0 ]
-                            , timeoutMilliseconds = 120000
-                            , maximumOutputBytes = 1024 * 1024
-                            }
-                            |> Task.mapError
-                                (\processError ->
-                                    PortError.create "SOURCE_CLONE_FAILED"
-                                        ("Could not clone "
-                                            ++ PackageName.toString name
-                                            ++ "@"
-                                            ++ tag
-                                            ++ " from "
-                                            ++ cloneUrl
-                                            ++ ": "
-                                            ++ PortError.toString processError
-                                        )
-                                )
+                    (\already ->
+                        if already then
+                            Task.succeed destination
+
+                        else
+                            System.File.ensureDirectory permissions.fileSystem parentPath
+                                |> Task.andThen (\_ -> generateUniqueSuffix permissions.childProcess)
+                                |> Task.andThen
+                                    (\uniqueSuffix ->
+                                        let
+                                            tempDest =
+                                                Path.fromPosixString
+                                                    (Path.toPosixString destination ++ ".partial." ++ uniqueSuffix)
+                                        in
+                                        cloneInto tempDest parentPath
+                                            |> Task.andThen
+                                                (\_ ->
+                                                    FileSystem.move permissions.fileSystem destination tempDest
+                                                        |> Task.mapError
+                                                            (FileSystem.errorToString
+                                                                >> PortError.create "CACHE_WRITE_FAILED"
+                                                            )
+                                                        |> Task.map (\_ -> destination)
+                                                        |> Task.onError (adoptWinnersArchive permissions destination tempDest)
+                                                )
+                                            |> Task.onError
+                                                (\cloneError ->
+                                                    removeIfExists permissions.fileSystem tempDest
+                                                        |> Task.onError (\_ -> Task.succeed {})
+                                                        |> Task.andThen (\_ -> Task.fail cloneError)
+                                                )
+                                    )
                     )
-                |> Task.map (\_ -> destination)
 
 
 verifyArchive : Node.Platform -> ChildProcess.Permission -> Path -> String -> Task Error {}

@@ -359,7 +359,14 @@ Coverage and pipeline:
   not a function"). Both now emit qualified Basics.max / Basics.compare.
   elm-rails re-ports verified; tier 0 221; canary 14/14.
 - **D38 D35 regression: inlined fallthrough duplicates same-name binders
-  nested** (found by gate v8 pure, OPEN, fix delegated): removing the tf_
+  nested** (found by gate v8 pure; FIXED 2026-07-22, Opus subagent +
+  Fable QA — freshenBinders in chainTupleArms alpha-renames only
+  COLLIDING binders in duplicated continuations, reusing the existing
+  rename/occupy machinery; free vars and the tail self-call untouched
+  so TCO holds. Proofs: 224 checks incl. 3 new AST-level guards
+  (no-shadowing walk, tail-position assert, non-vacuous duplication),
+  elm-diff verified:true, list-extra 219/219 NON-REGRESSION, canary
+  14/14. Originally filed as: removing the tf_
   thunks makes each duplicated continuation re-match the scrutinee INSIDE
   the previous arm's partial match; when consecutive source arms bind the
   same names (elm-diff's leftX/leftY), Gren rejects the nested rebinding

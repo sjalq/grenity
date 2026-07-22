@@ -3932,6 +3932,22 @@ chainTupleArms sole seed temps arms fail =
             let
                 next =
                     chainTupleArms sole (seed + 1) temps more fail
+
+                -- D38: the inlined continuation is duplicated at each mismatch
+                -- branch of THIS arm, so it lands nested inside the scope of
+                -- this arm's own pattern binders. When a later arm re-binds the
+                -- same names (consecutive `leftX/leftY` tuple arms, jinjor/
+                -- elm-diff), Gren rejects the nested rebind as SHADOWING. The
+                -- pre-D35 thunk gave the continuation its own scope, hiding the
+                -- clash. Alpha-rename the continuation's binders that collide
+                -- with this arm's binders (first occurrence keeps its names;
+                -- only the nested copy is freshened). Free occurrences — list
+                -- temps and the tail-positioned self-call that keeps TCO alive —
+                -- are left untouched, so recursion stays in syntactic tail
+                -- position.
+                freshNext =
+                    freshenBinders (occupyAll (patternBinders arm.pattern) emptyScope)
+                        next
             in
             -- Inline the fallthrough continuation directly rather than wrapping
             -- it in a called local thunk (`let tf_ _ = next in ... tf_ {}`).
@@ -3943,7 +3959,7 @@ chainTupleArms sole seed temps arms fail =
             -- Gren's TCO turn it into a loop. Gren is pure, so duplicating the
             -- fallthrough expression at each mismatch branch is semantics-
             -- preserving; tuple-list matches are small, bounding the copy count.
-            matchTupleArmColumns sole temps arm.pattern arm.body next
+            matchTupleArmColumns sole temps arm.pattern arm.body freshNext
 
 
 matchTupleArmColumns :
@@ -3977,6 +3993,133 @@ matchTupleArmColumns sole temps pattern body fail =
 
         _ ->
             fail
+
+
+{-| Alpha-rename every binder in `expr` that collides with `scope`, threading
+the growing occupied set through nested binding constructs so no two nested
+binders share a name. Only binders that clash are renamed (via `bindPattern`/
+`bindName`); free occurrences are rewritten to follow their binder through
+`renameExpr`, and names free in `expr` (list temps, self-recursive calls) are
+never touched. Used to give a duplicated fallthrough continuation its own
+binder scope so D35's inlining cannot produce Gren SHADOWING (D38).
+-}
+freshenBinders : Scope -> Expr -> Expr
+freshenBinders scope expr =
+    when expr is
+        ExprCase { expression = scrutinee, cases = arms } ->
+            ExprCase
+                { expression = freshenBinders scope scrutinee
+                , cases =
+                    Array.map
+                        (\arm ->
+                            let
+                                bound =
+                                    bindPattern arm.pattern scope
+                            in
+                            { pattern = bound.pattern
+                            , body =
+                                freshenBinders bound.scope
+                                    (renameExpr bound.subst arm.body)
+                            })
+                        arms
+                }
+
+        ExprLambda { arguments = arguments, expression = body } ->
+            let
+                bound =
+                    bindPatternList arguments scope
+            in
+            ExprLambda
+                { arguments = bound.patterns
+                , expression =
+                    freshenBinders bound.scope (renameExpr bound.subst body)
+                }
+
+        ExprLet { declarations = declarations, expression = body } ->
+            freshenLet scope declarations body
+
+        _ ->
+            Walk.mapExprChildren (freshenBinders scope) expr
+
+
+{-| Alpha-rename the binders of a `let` block. Gren `let` bindings are mutually
+recursive, so every binder is occupied first, then each right-hand side and the
+body are rewritten under the merged substitution.
+-}
+freshenLet : Scope -> Array LetDecl -> Expr -> Expr
+freshenLet scope declarations body =
+    let
+        collected =
+            Array.foldl
+                (\decl acc ->
+                    when decl is
+                        LetFunction fn ->
+                            let
+                                bound =
+                                    bindName fn.name acc.scope
+                            in
+                            { scope = bound.scope
+                            , subst = mergeSubst acc.subst bound.subst
+                            , decls =
+                                Array.pushLast
+                                    (LetFunction { fn | name = bound.name })
+                                    acc.decls
+                            }
+
+                        LetDestructure
+                            { pattern = pattern, expression = expression } ->
+                            let
+                                bound =
+                                    bindPattern pattern acc.scope
+                            in
+                            { scope = bound.scope
+                            , subst = mergeSubst acc.subst bound.subst
+                            , decls =
+                                Array.pushLast
+                                    (LetDestructure
+                                        { pattern = bound.pattern
+                                        , expression = expression
+                                        })
+                                    acc.decls
+                            })
+                { scope = scope, subst = Dict.empty, decls = [] }
+                declarations
+
+        newDecls =
+            Array.map
+                (\decl ->
+                    when decl is
+                        LetFunction fn ->
+                            let
+                                argBound =
+                                    bindPatternList fn.arguments collected.scope
+                            in
+                            LetFunction
+                                { fn
+                                    | arguments = argBound.patterns
+                                    , expression =
+                                        freshenBinders argBound.scope
+                                            (renameExpr
+                                                (mergeSubst collected.subst
+                                                    argBound.subst)
+                                                fn.expression)
+                                }
+
+                        LetDestructure d ->
+                            LetDestructure
+                                { d
+                                    | expression =
+                                        freshenBinders collected.scope
+                                            (renameExpr collected.subst
+                                                d.expression)
+                                })
+                collected.decls
+    in
+    ExprLet
+        { declarations = newDecls
+        , expression =
+            freshenBinders collected.scope (renameExpr collected.subst body)
+        }
 
 
 isTupleList : Int -> Array CaseArm -> Bool

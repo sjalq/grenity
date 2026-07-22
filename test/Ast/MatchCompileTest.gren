@@ -1,0 +1,430 @@
+module Ast.MatchCompileTest exposing (tests)
+
+{-| D38: consecutive tuple-case arms that bind the same pattern variables must
+compile without Gren SHADOWING, while the self-recursive call in the final arm
+stays in syntactic tail position (the D35 TCO receipt must hold).
+
+D35 inlines the fallthrough continuation at each tuple-arm mismatch branch. When
+two consecutive source arms bind the same names (e.g. `leftX`/`leftY`), the
+duplicated continuation re-matches the scrutinee nested inside the previous
+arm's binding scope, so the same names bind at two nested levels. Gren rejects
+that as shadowing. `MatchCompile.freshenBinders` alpha-renames the nested copy's
+binders; the fix must never move the recursion out of tail position.
+-}
+
+import Array exposing ( Array )
+import Ast.CtorLaw as CtorLaw
+import Ast.MatchCompile as MatchCompile
+import Ast.Types exposing
+    ( Declaration(..)
+    , Expr(..)
+    , File
+    , LetDecl(..)
+    , ModuleKind(..)
+    , Exposing(..)
+    , Pattern(..)
+    )
+import Dict exposing ( Dict )
+
+
+type alias Check =
+    { name : String
+    , passed : Bool
+    , details : String
+    }
+
+
+tests : Array Check
+tests =
+    [ compilesWithoutShadowing
+    , keepsSelfCallInTailPosition
+    , duplicatesTheContinuation
+    ]
+
+
+ok : String -> Check
+ok name =
+    { name = name, passed = True, details = "" }
+
+
+fail : String -> String -> Check
+fail name details =
+    { name = name, passed = False, details = details }
+
+
+
+-- FIXTURE ---------------------------------------------------------------------
+
+
+bare : String -> Expr
+bare name =
+    ExprVar { moduleName = Nothing, name = name }
+
+
+{-| `step xs ys acc = case (xs, ys) of
+        ( (leftX, leftY) :: rest, [] ) -> acc + leftX
+        ( (leftX, leftY) :: rest, _ )  -> step rest ys (acc + leftX)
+        _ -> acc`
+
+Two consecutive tuple arms bind the same `leftX`/`leftY`/`rest`; the second arm
+tail-calls `step`. This is the jinjor/elm-diff Wu-diff shape, reduced.
+-}
+fixtureFile : File
+fixtureFile =
+    let
+        tupleColPattern col1 =
+            PatTuple
+                [ PatCons
+                    { head = PatTuple [ PatVar "leftX", PatVar "leftY" ]
+                    , tail = PatVar "rest"
+                    }
+                , col1
+                ]
+
+        selfCall =
+            ExprApplication
+                [ bare "step"
+                , bare "rest"
+                , bare "ys"
+                , ExprBinop
+                    { operator = "+", left = bare "acc", right = bare "leftX" }
+                ]
+
+        body =
+            ExprCase
+                { expression = ExprTuple [ bare "xs", bare "ys" ]
+                , cases =
+                    [ { pattern = tupleColPattern (PatList [])
+                      , body =
+                            ExprBinop
+                                { operator = "+"
+                                , left = bare "acc"
+                                , right = bare "leftX"
+                                }
+                      }
+                    , { pattern = tupleColPattern PatAll
+                      , body = selfCall
+                      }
+                    , { pattern = PatAll
+                      , body = bare "acc"
+                      }
+                    ]
+                }
+    in
+    { schemaVersion = 1
+    , moduleDefinition =
+        { kind = NormalModule
+        , moduleName = "Fixture"
+        , exposing_ = ExposeAll
+        }
+    , comments = []
+    , imports = []
+    , declarations =
+        [ DeclFunction
+            { name = "step"
+            , documentation = Nothing
+            , signature = Nothing
+            , arguments = [ PatVar "xs", PatVar "ys", PatVar "acc" ]
+            , expression = body
+            }
+        ]
+    }
+
+
+{-| Lower with the real CtorLaw prefix, then run MatchCompile — the pipeline
+order — and return the compiled `step` body.
+-}
+compiledBody : Maybe Expr
+compiledBody =
+    let
+        lowered =
+            CtorLaw.apply (CtorLaw.collectFromFile fixtureFile) fixtureFile
+
+        compiled =
+            MatchCompile.compile Dict.empty lowered
+    in
+    when Array.get 0 compiled.declarations is
+        Just (DeclFunction fn) ->
+            Just fn.expression
+
+        _ ->
+            Nothing
+
+
+
+-- CHECKS ----------------------------------------------------------------------
+
+
+compilesWithoutShadowing : Check
+compilesWithoutShadowing =
+    when compiledBody is
+        Just body ->
+            if hasNestedShadowing Dict.empty body then
+                fail "compilesWithoutShadowing"
+                    "a binder is rebound while already in scope (Gren SHADOWING)"
+
+            else
+                ok "compilesWithoutShadowing"
+
+        Nothing ->
+            fail "compilesWithoutShadowing" "no compiled `step` declaration"
+
+
+keepsSelfCallInTailPosition : Check
+keepsSelfCallInTailPosition =
+    when compiledBody is
+        Just body ->
+            if tailHasSelfCall "step" body then
+                ok "keepsSelfCallInTailPosition"
+
+            else
+                fail "keepsSelfCallInTailPosition"
+                    "recursive `step` call is no longer in syntactic tail position"
+
+        Nothing ->
+            fail "keepsSelfCallInTailPosition" "no compiled `step` declaration"
+
+
+{-| Guard against the test going vacuous: the tuple-list path must actually run
+and duplicate the continuation, so the `leftX` binder family must appear more
+than once (original + at least one freshened copy).
+-}
+duplicatesTheContinuation : Check
+duplicatesTheContinuation =
+    when compiledBody is
+        Just body ->
+            let
+                leftXBinders =
+                    allBinders body
+                        |> Array.keepIf (String.startsWith "leftX")
+            in
+            if Array.length leftXBinders >= 2 then
+                ok "duplicatesTheContinuation"
+
+            else
+                fail "duplicatesTheContinuation"
+                    ("expected >=2 `leftX*` binders, got "
+                        ++ String.fromInt (Array.length leftXBinders)
+                    )
+
+        Nothing ->
+            fail "duplicatesTheContinuation" "no compiled `step` declaration"
+
+
+
+-- AST WALKERS -----------------------------------------------------------------
+
+
+patternBinders : Pattern -> Array String
+patternBinders pattern =
+    when pattern is
+        PatVar name ->
+            [ name ]
+
+        PatAs { pattern = inner, name = name } ->
+            Array.pushLast name (patternBinders inner)
+
+        PatNamed { arguments = args } ->
+            Array.foldl (\p acc -> Array.append acc (patternBinders p)) [] args
+
+        PatTuple items ->
+            Array.foldl (\p acc -> Array.append acc (patternBinders p)) [] items
+
+        PatList items ->
+            Array.foldl (\p acc -> Array.append acc (patternBinders p)) [] items
+
+        PatCons { head = head, tail = tail } ->
+            Array.append (patternBinders head) (patternBinders tail)
+
+        PatRecordBind fields ->
+            Array.foldl (\f acc -> Array.append acc (patternBinders f.pattern))
+                [] fields
+
+        PatRecord names ->
+            names
+
+        _ ->
+            []
+
+
+{-| True when any binder is introduced while a binder of the same name is
+already in `scope` — i.e. the exact nesting Gren rejects as SHADOWING.
+-}
+hasNestedShadowing : Dict String {} -> Expr -> Bool
+hasNestedShadowing scope expr =
+    when expr is
+        ExprCase { expression = scrutinee, cases = arms } ->
+            hasNestedShadowing scope scrutinee
+                || Array.any (armShadows scope) arms
+
+        ExprLambda { arguments = arguments, expression = body } ->
+            let
+                binders =
+                    Array.foldl (\p acc -> Array.append acc (patternBinders p))
+                        [] arguments
+            in
+            clashes scope binders
+                || hasNestedShadowing (occupy scope binders) body
+
+        ExprLet { declarations = declarations, expression = body } ->
+            let
+                binders =
+                    Array.foldl
+                        (\decl acc ->
+                            when decl is
+                                LetFunction fn ->
+                                    Array.pushLast fn.name acc
+
+                                LetDestructure { pattern = pattern } ->
+                                    Array.append acc (patternBinders pattern)
+                        )
+                        []
+                        declarations
+
+                inner =
+                    occupy scope binders
+
+                declShadows =
+                    Array.any
+                        (\decl ->
+                            when decl is
+                                LetFunction fn ->
+                                    hasNestedShadowing inner fn.expression
+
+                                LetDestructure { expression = e } ->
+                                    hasNestedShadowing inner e
+                        )
+                        declarations
+            in
+            clashes scope binders
+                || declShadows
+                || hasNestedShadowing inner body
+
+        _ ->
+            Array.any (hasNestedShadowing scope) (childExprs expr)
+
+
+armShadows : Dict String {} -> { pattern : Pattern, body : Expr } -> Bool
+armShadows scope arm =
+    let
+        binders =
+            patternBinders arm.pattern
+    in
+    clashes scope binders
+        || hasNestedShadowing (occupy scope binders) arm.body
+
+
+clashes : Dict String {} -> Array String -> Bool
+clashes scope binders =
+    Array.any (\b -> Dict.member b scope) binders
+
+
+occupy : Dict String {} -> Array String -> Dict String {}
+occupy scope binders =
+    Array.foldl (\b acc -> Dict.set b {} acc) scope binders
+
+
+{-| A self-call to `name` in syntactic tail position: the whole expression, or
+the tail of every branch of a case / if / let.
+-}
+tailHasSelfCall : String -> Expr -> Bool
+tailHasSelfCall name expr =
+    when expr is
+        ExprApplication parts ->
+            when Array.get 0 parts is
+                Just (ExprVar ref) ->
+                    ref.moduleName == Nothing && ref.name == name
+
+                _ ->
+                    False
+
+        ExprCase { cases = arms } ->
+            Array.any (\arm -> tailHasSelfCall name arm.body) arms
+
+        ExprIf { then_ = t, else_ = e } ->
+            tailHasSelfCall name t || tailHasSelfCall name e
+
+        ExprLet { expression = body } ->
+            tailHasSelfCall name body
+
+        _ ->
+            False
+
+
+allBinders : Expr -> Array String
+allBinders expr =
+    when expr is
+        ExprCase { expression = scrutinee, cases = arms } ->
+            Array.append (allBinders scrutinee)
+                (Array.foldl
+                    (\arm acc ->
+                        acc
+                            |> Array.append (patternBinders arm.pattern)
+                            |> (\a -> Array.append a (allBinders arm.body))
+                    )
+                    []
+                    arms
+                )
+
+        ExprLambda { arguments = arguments, expression = body } ->
+            Array.foldl (\p acc -> Array.append acc (patternBinders p))
+                (allBinders body)
+                arguments
+
+        ExprLet { declarations = declarations, expression = body } ->
+            Array.foldl
+                (\decl acc ->
+                    when decl is
+                        LetFunction fn ->
+                            acc
+                                |> Array.pushLast fn.name
+                                |> (\a -> Array.append a (allBinders fn.expression))
+
+                        LetDestructure { pattern = pattern, expression = e } ->
+                            acc
+                                |> Array.append (patternBinders pattern)
+                                |> (\a -> Array.append a (allBinders e))
+                )
+                (allBinders body)
+                declarations
+
+        _ ->
+            Array.foldl (\c acc -> Array.append acc (allBinders c)) []
+                (childExprs expr)
+
+
+{-| Direct child expressions (no binder handling); used for the recursive fall
+through in walkers that treat binding forms specially.
+-}
+childExprs : Expr -> Array Expr
+childExprs expr =
+    when expr is
+        ExprApplication parts ->
+            parts
+
+        ExprBinop { left = left, right = right } ->
+            [ left, right ]
+
+        ExprIf { condition = c, then_ = t, else_ = e } ->
+            [ c, t, e ]
+
+        ExprNegation inner ->
+            [ inner ]
+
+        ExprTuple items ->
+            items
+
+        ExprList items ->
+            items
+
+        ExprRecord fields ->
+            Array.map (\f -> f.value) fields
+
+        ExprAccess { record = record } ->
+            [ record ]
+
+        ExprUpdate { fields = fields } ->
+            Array.map (\f -> f.value) fields
+
+        _ ->
+            []

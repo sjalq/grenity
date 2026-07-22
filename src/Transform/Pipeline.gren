@@ -365,6 +365,12 @@ transform registry extraction sources =
                     -- transformed module names (`Elm.Internal.Model.StyleClass`)
                     -- and import-alias indexes (`Internal.StyleClass`) used by
                     -- RecordAlias / CtorLaw / MatchCompile.
+                    -- D24: cross-module return-shape evidence must be in ELM
+                    -- names (TupleCompare runs pre-NameSub), so collect after
+                    -- BareResolve only.
+                    packageTupleReturns =
+                        collectPackageTupleReturns extraction.modules
+
                     packageRecordAliases =
                         collectPackageRecordAliases registry extraction.modules
 
@@ -396,6 +402,7 @@ transform registry extraction sources =
                                         findMatchingExtraction source.path extraction.modules
                                             |> Result.andThen
                                                 (transformModule registry
+                                                    packageTupleReturns
                                                     packageRecordAliases
                                                     packageCtorArities
                                                     packageSoleCtors
@@ -439,6 +446,54 @@ collectPackageRecordAliases :
     -> Dict String (Array String)
 collectPackageRecordAliases registry modules =
     foldNamedAsts registry modules AstRecordAlias.collectFromFile Dict.empty
+
+
+{-| D24 evidence index: `"Module.fn"` → element shape, for every function
+whose signature returns a list of tuples. Elm names (BareResolve only —
+TupleCompare consumes this pre-NameSub).
+-}
+collectPackageTupleReturns :
+    Array Protocol.ModuleExtraction
+    -> Dict String (Array AstTupleCompare.ElemShape)
+collectPackageTupleReturns modules =
+    Array.foldl
+        (\moduleExtraction acc ->
+            when moduleExtraction.ast is
+                Nothing ->
+                    acc
+
+                Just astValue ->
+                    when AstDecode.decode astValue is
+                        Err _ ->
+                            acc
+
+                        Ok file ->
+                            let
+                                resolved =
+                                    AstBareResolve.apply file
+                            in
+                            Array.foldl
+                                (\declaration inner ->
+                                    when declaration is
+                                        Ast.Types.DeclFunction { name = name, signature = Just sig } ->
+                                            when AstTupleCompare.returnListShape sig.typeAnnotation is
+                                                Just shape ->
+                                                    Dict.set
+                                                        (resolved.moduleDefinition.moduleName ++ "." ++ name)
+                                                        shape
+                                                        inner
+
+                                                Nothing ->
+                                                    inner
+
+                                        _ ->
+                                            inner
+                                )
+                                acc
+                                resolved.declarations
+        )
+        Dict.empty
+        modules
 
 
 {-| `"Module.Ctor"` → arity (≥ 2), from every AST in the package.
@@ -533,6 +588,7 @@ foldNamedAsts registry modules collect acc =
 
 transformModule :
     Registry
+    -> Dict String (Array AstTupleCompare.ElemShape)
     -> Dict String (Array String)
     -> Dict String Int
     -> Dict String {}
@@ -540,7 +596,7 @@ transformModule :
     -> SourceFile
     -> Protocol.ModuleExtraction
     -> Result Error TransformedModule
-transformModule registry packageRecordAliases packageCtorArities packageSoleCtors packageReservedExports input extraction =
+transformModule registry packageTupleReturns packageRecordAliases packageCtorArities packageSoleCtors packageReservedExports input extraction =
     toGrenSourcePath input.path
         |> Result.andThen
             (\outputPath ->
@@ -554,6 +610,7 @@ transformModule registry packageRecordAliases packageCtorArities packageSoleCtor
 
                     Just astValue ->
                         transformModuleViaAst registry
+                            packageTupleReturns
                             packageRecordAliases
                             packageCtorArities
                             packageSoleCtors
@@ -567,6 +624,7 @@ transformModule registry packageRecordAliases packageCtorArities packageSoleCtor
 
 transformModuleViaAst :
     Registry
+    -> Dict String (Array AstTupleCompare.ElemShape)
     -> Dict String (Array String)
     -> Dict String Int
     -> Dict String {}
@@ -576,7 +634,7 @@ transformModuleViaAst :
     -> String
     -> Decode.Value
     -> Result Error TransformedModule
-transformModuleViaAst registry packageRecordAliases packageCtorArities packageSoleCtors packageReservedExports input extraction outputPath astValue =
+transformModuleViaAst registry packageTupleReturns packageRecordAliases packageCtorArities packageSoleCtors packageReservedExports input extraction outputPath astValue =
     when AstDecode.decode astValue is
         Err decodeError ->
             Err <|
@@ -592,7 +650,7 @@ transformModuleViaAst registry packageRecordAliases packageCtorArities packageSo
                 lowered =
                     file
                         |> AstBareResolve.apply
-                        |> AstTupleCompare.apply
+                        |> AstTupleCompare.apply packageTupleReturns
                         |> AstNameSub.apply registry
                         |> AstRecordAlias.apply packageRecordAliases
                         |> AstCtorLaw.apply packageCtorArities

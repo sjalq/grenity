@@ -2,6 +2,8 @@ module Ast.TupleCompare exposing
     ( apply
     , ElemShape(..)
     , comparatorFor
+    , listElementShape
+    , returnListShape
     , shapeOfTypeAnn
     )
 
@@ -54,23 +56,62 @@ type alias Env =
       tupleVars : Dict String (Array ElemShape)
     , -- variable name -> element shape of the list-of-tuples it holds
       listVars : Dict String (Array ElemShape)
+    , -- function key ("Module.fn" or bare local "fn") -> element shape of
+      -- the list-of-tuples it RETURNS (frequencies-class evidence)
+      returns : Dict String (Array ElemShape)
     }
 
 
-apply : File -> File
-apply file =
+{-| `packageReturns` carries cross-module return-shape evidence keyed by the
+Elm-qualified function name ("List.Extra.frequencies"); same-file functions
+are indexed here from the file's own signatures (bare and self-qualified).
+-}
+apply : Dict String (Array ElemShape) -> File -> File
+apply packageReturns file =
+    let
+        returns =
+            Array.foldl
+                (\declaration acc ->
+                    when declaration is
+                        DeclFunction { name = name, signature = Just sig } ->
+                            when returnListShape sig.typeAnnotation is
+                                Just shape ->
+                                    acc
+                                        |> Dict.set name shape
+                                        |> Dict.set (file.moduleDefinition.moduleName ++ "." ++ name) shape
+
+                                Nothing ->
+                                    acc
+
+                        _ ->
+                            acc
+                )
+                packageReturns
+                file.declarations
+    in
     { file
-        | declarations = Array.map applyDeclaration file.declarations
+        | declarations = Array.map (applyDeclaration returns) file.declarations
     }
 
 
-applyDeclaration : Declaration -> Declaration
-applyDeclaration declaration =
+{-| Element shape of the list-of-tuples at the END of a signature's spine. -}
+returnListShape : TypeAnn -> Maybe (Array ElemShape)
+returnListShape annotation =
+    when annotation is
+        TypeFunction { right = right } ->
+            returnListShape right
+
+        _ ->
+            listElementShape annotation
+
+
+applyDeclaration : Dict String (Array ElemShape) -> Declaration -> Declaration
+applyDeclaration returns declaration =
     when declaration is
         DeclFunction fn ->
             let
                 env =
-                    envFromSignature fn.signature fn.arguments
+                    envFromSignature returns fn.signature fn.arguments
             in
             DeclFunction { fn | expression = rewrite env fn.expression }
 
@@ -83,11 +124,11 @@ each `PatVar` whose positional type is a tuple (or list of tuples) enters
 the evidence environment. Elm forbids shadowing, so one name maps to one
 binding for the whole declaration.
 -}
-envFromSignature : Maybe { name : String, typeAnnotation : TypeAnn } -> Array Pattern -> Env
-envFromSignature signature arguments =
+envFromSignature : Dict String (Array ElemShape) -> Maybe { name : String, typeAnnotation : TypeAnn } -> Array Pattern -> Env
+envFromSignature returns signature arguments =
     let
         empty =
-            { tupleVars = Dict.empty, listVars = Dict.empty }
+            { tupleVars = Dict.empty, listVars = Dict.empty, returns = returns }
     in
     when signature is
         Nothing ->
@@ -215,8 +256,49 @@ listShapeOfExpr env expr =
         ExprVar { moduleName = Nothing, name = name } ->
             Dict.get name env.listVars
 
+        ExprApplication parts ->
+            -- frequencies-class: a saturated call to a function whose
+            -- signature returns a list of tuples.
+            when Array.get 0 parts is
+                Just (ExprVar ref) ->
+                    if Array.length parts >= 2 then
+                        Dict.get (refKey ref) env.returns
+
+                    else
+                        Nothing
+
+                _ ->
+                    Nothing
+
+        ExprBinop { operator = "|>", left = left, right = right } ->
+            listShapeOfExpr env (pipeAsApplication right left)
+
+        ExprBinop { operator = "<|", left = left, right = right } ->
+            listShapeOfExpr env (pipeAsApplication left right)
+
         _ ->
             Nothing
+
+
+{-| View `arg |> fn` (or `fn <| arg`) as the application it denotes. -}
+pipeAsApplication : Expr -> Expr -> Expr
+pipeAsApplication fn arg =
+    when fn is
+        ExprApplication parts ->
+            ExprApplication (Array.pushLast arg parts)
+
+        _ ->
+            ExprApplication [ fn, arg ]
+
+
+refKey : { moduleName : Maybe String, name : String } -> String
+refKey ref =
+    when ref.moduleName is
+        Just moduleName ->
+            moduleName ++ "." ++ ref.name
+
+        Nothing ->
+            ref.name
 
 
 {-| A projection function whose result is provably a tuple:
@@ -257,6 +339,22 @@ rewriteNode env expr =
                 _ ->
                     expr
 
+        ExprBinop { operator = "|>", left = left, right = ExprVar ref } ->
+            when pipedListRewrite env ref left is
+                Just rewritten ->
+                    rewritten
+
+                Nothing ->
+                    expr
+
+        ExprBinop { operator = "<|", left = ExprVar ref, right = right } ->
+            when pipedListRewrite env ref right is
+                Just rewritten ->
+                    rewritten
+
+                Nothing ->
+                    expr
+
         ExprBinop { operator = operator, left = left, right = right } ->
             when orderBinop operator is
                 Nothing ->
@@ -273,6 +371,40 @@ rewriteNode env expr =
 
         _ ->
             expr
+
+
+{-| `xs |> List.sort` / `List.sort <| xs` family. The rewrite result is the
+plain application form — pipe style is not preserved, correctness is.
+-}
+pipedListRewrite : Env -> Ast.Types.NamedRef -> Expr -> Maybe Expr
+pipedListRewrite env ref listArg =
+    if isListFn ref "sort" || isListFn ref "minimum" || isListFn ref "maximum" then
+        when listShapeOfExpr env listArg is
+            Nothing ->
+                Nothing
+
+            Just shape ->
+                if isListFn ref "sort" then
+                    Just (ExprApplication [ listVar "sortWith", comparatorFor shape 0, listArg ])
+
+                else if isListFn ref "minimum" then
+                    Just
+                        (ExprApplication
+                            [ listVar "head"
+                            , ExprApplication [ listVar "sortWith", comparatorFor shape 0, listArg ]
+                            ]
+                        )
+
+                else
+                    Just
+                        (ExprApplication
+                            [ listVar "head"
+                            , ExprApplication [ listVar "sortWith", flippedComparator shape, listArg ]
+                            ]
+                        )
+
+    else
+        Nothing
 
 
 {-| `List.sort xs` family — one list argument. -}

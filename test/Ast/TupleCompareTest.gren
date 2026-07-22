@@ -39,6 +39,7 @@ tests =
     , comparatorTieBreaksOnSecond
     , comparatorEqualTuples
     , comparatorNestedTuple
+    , rewritesPipedSortViaReturnShape
     ]
 
 
@@ -127,7 +128,7 @@ rewritesAnnotatedSort =
                 [ PatVar "pairs" ]
                 (listSort pairsVar)
     in
-    when subjectBody (TupleCompare.apply file) is
+    when subjectBody (TupleCompare.apply Dict.empty file) is
         Just (ExprApplication [ ExprVar { moduleName = Just "List", name = "sortWith" }, ExprLambda _, ExprVar { name = "pairs" } ]) ->
             ok "rewritesAnnotatedSort"
 
@@ -145,7 +146,7 @@ noRewriteWithoutEvidence =
         file =
             fileWith Nothing [ PatVar "xs" ] body
     in
-    when subjectBody (TupleCompare.apply file) is
+    when subjectBody (TupleCompare.apply Dict.empty file) is
         Just (ExprApplication [ ExprVar { name = "sort" }, ExprVar { name = "xs" } ]) ->
             ok "noRewriteWithoutEvidence"
 
@@ -177,7 +178,7 @@ rewritesSortByProjection =
                     ]
                 )
     in
-    when subjectBody (TupleCompare.apply file) is
+    when subjectBody (TupleCompare.apply Dict.empty file) is
         Just (ExprApplication [ ExprVar { name = "sortWith" }, ExprLambda _, ExprVar { name = "xs" } ]) ->
             ok "rewritesSortByProjection"
 
@@ -212,12 +213,44 @@ rewritesOrderBinop =
                     }
                 )
     in
-    when subjectBody (TupleCompare.apply file) is
+    when subjectBody (TupleCompare.apply Dict.empty file) is
         Just (ExprBinop { operator = "==", left = ExprApplication _, right = ExprVar { name = "LT" } }) ->
             ok "rewritesOrderBinop"
 
         other ->
             fail "rewritesOrderBinop" ("got: " ++ Debug.toString other)
+
+{-| The frequencies class: `xs |> Module.freq |> List.sort` where tuple-ness
+comes only from freq's RETURN type in the package index, through a pipe.
+-}
+rewritesPipedSortViaReturnShape : Check
+rewritesPipedSortViaReturnShape =
+    let
+        index =
+            Dict.set "Helpers.freq" [ Prim, Prim ] Dict.empty
+
+        body =
+            ExprBinop
+                { operator = "|>"
+                , left =
+                    ExprBinop
+                        { operator = "|>"
+                        , left = ExprVar { moduleName = Nothing, name = "xs" }
+                        , right = ExprVar { moduleName = Just "Helpers", name = "freq" }
+                        }
+                , right = ExprVar { moduleName = Just "List", name = "sort" }
+                }
+
+        file =
+            fileWith Nothing [ PatVar "xs" ] body
+    in
+    when subjectBody (TupleCompare.apply index file) is
+        Just (ExprApplication [ ExprVar { name = "sortWith" }, ExprLambda _, ExprBinop _ ]) ->
+            ok "rewritesPipedSortViaReturnShape"
+
+        other ->
+            fail "rewritesPipedSortViaReturnShape" ("got: " ++ Debug.toString other)
+
 
 -- BEHAVIOR (Eval oracle on generated comparators) -----------------------------
 

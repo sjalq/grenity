@@ -344,6 +344,23 @@ Coverage and pipeline:
   REMAINS OPEN (D24b): tuple-typed Dict keys / Set members (type-level
   encoding law) and comparable type-vars instantiated with tuples — both
   still ledger as before; no behavior change on unproven sites.
+  D24a EXTENDED same day (list-extra receipt drove it): pipe forms
+  (`xs |> List.sort`, `<|`) and RETURN-shape evidence — a package-wide
+  index of functions whose signatures return lists of tuples
+  (collectPackageTupleReturns, Elm names pre-NameSub), so
+  `list |> frequencies |> List.sort` rewrites. RECEIPT: list-extra's
+  suite went from 0 tests ran (compile-dead) to 215/219 passing.
+  The 4 fails are list-extra's own "stack safety" 10k-recursion tests
+  (RangeError) — a NEW distinct class, filed as D35.
+- **D35 deep-recursion stack overflow in ported code** (found by the
+  D24a list-extra receipt, OPEN): list-extra's 4 "stack safety" tests
+  (10k+ elements through intersperse/isInfixOf etc.) blow the node stack
+  in the ported build. Elm survives via its own list representation and
+  per-function accumulator styles; the port's output recursion is not
+  always stack-safe on giant inputs. Divergence class for the ledger
+  (behavior beyond ~10k-element recursion depth), not a blocker: 215/219
+  behavior cases pass. Fix shape when drained: accumulator/iterative
+  rewrite law for self-recursive functions, or Gren-side trampolining.
 
 ---
 

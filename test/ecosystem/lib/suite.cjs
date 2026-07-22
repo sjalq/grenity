@@ -306,7 +306,14 @@ async function runSuite(options) {
       `[suite] convoy guard: ${volumeTail.length} volume package(s) deferred to the tail`,
     );
   }
+  const volumeSet = new Set(volumeTail);
   await mapPool(orderedPackages, poolRef, async (pkg, index) => {
+    // Volume tail runs narrow: N giant CPU-bound transforms at -j9 starve
+    // each other's budgets (gate v6: 3 scale fails that pass at -j5).
+    if (volumeSet.has(pkg) && poolRef.current > 3) {
+      poolRef.current = 3;
+      console.log(`[suite] volume tail: pool clamped to -j3`);
+    }
     if (stop) {
       return;
     }

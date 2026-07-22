@@ -118,8 +118,16 @@ listFilesRecursively permission root =
                                             Task.succeed (Array.pushLast absolute found)
 
                                         FileSystem.Directory ->
-                                            listFilesRecursively permission absolute
-                                                |> Task.map (Array.append found)
+                                            -- Build/VCS litter is never source, and elm-stuff
+                                            -- inside shared cached trees is rewritten by
+                                            -- concurrent extraction — recursing into it races
+                                            -- ENOENT mid-walk (gate v6 browser).
+                                            if isTransientDirectory (Path.filenameWithExtension entry.path) then
+                                                Task.succeed found
+
+                                            else
+                                                listFilesRecursively permission absolute
+                                                    |> Task.map (Array.append found)
 
                                         _ ->
                                             Task.succeed found
@@ -128,6 +136,13 @@ listFilesRecursively permission root =
                     (Task.succeed [])
                     entries
             )
+
+
+{-| Directories that hold generated or VCS state, never package sources.
+-}
+isTransientDirectory : String -> Bool
+isTransientDirectory name =
+    name == "elm-stuff" || name == ".git" || name == "node_modules" || name == ".gren"
 
 
 writeText : FileSystem.Permission -> Path -> String -> Task Error Path

@@ -223,6 +223,47 @@ function parseArgs(argv) {
   return opts;
 }
 
+const MIN_FREE_BYTES = 2 * 1024 ** 3;
+
+function freeBytes() {
+  try {
+    const st = fs.statfsSync(root);
+    return st.bavail * st.bsize;
+  } catch {
+    return Infinity;
+  }
+}
+
+/** Outputs and per-package extraction litter are transient: the walk-log is
+ * the ground truth. Delete both after the record is written, or the walk
+ * eats the disk (observed: ENOSPC at ~700 packages, ~40MB elm-stuff each). */
+function cleanupAfterRecord(entry, out, cacheDir) {
+  fs.rmSync(out, { recursive: true, force: true });
+  const coordDir = path.join(
+    cacheDir,
+    "registry",
+    "packages",
+    ...entry.name.split("/"),
+    entry.version,
+  );
+  const stack = [coordDir];
+  while (stack.length) {
+    const dir = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const p2 = path.join(dir, e.name);
+      if (e.name === "elm-stuff") fs.rmSync(p2, { recursive: true, force: true });
+      else stack.push(p2);
+    }
+  }
+}
+
 async function portOne(entry, stamp, opts) {
   const coordinate = `${entry.name}@${entry.version}`;
   const out = path.join(outRoot, entry.name.replace("/", "__") + `__${entry.version}`);
@@ -297,6 +338,10 @@ async function main() {
     return;
   }
 
+  if (freeBytes() < MIN_FREE_BYTES * 2) {
+    console.error("[walk] refusing to start: need at least 4GB free disk");
+    process.exit(3);
+  }
   const snapshot = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
   const stamp = gitStamp(root);
   rotateIfNeeded();
@@ -352,6 +397,18 @@ async function main() {
 
     if (!opts.dryRun) {
       appendRecord(record);
+      if (candidacy.candidate) {
+        const out = path.join(outRoot, entry.name.replace("/", "__") + `__${entry.version}`);
+        try {
+          cleanupAfterRecord(entry, out, opts.cacheDir);
+        } catch {
+          /* cleanup is best-effort */
+        }
+      }
+      if (freeBytes() < MIN_FREE_BYTES) {
+        console.error(`[walk] ABORT: free disk below ${MIN_FREE_BYTES} bytes — resume after cleanup`);
+        process.exit(3);
+      }
     }
     processed += 1;
     const key = record.reason ? `${record.status}:${record.reason}` : record.status;

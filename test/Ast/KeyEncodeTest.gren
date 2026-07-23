@@ -1,0 +1,506 @@
+module Ast.KeyEncodeTest exposing (tests)
+
+{-| D24b: tuple-keyed Dict/Set encoding.
+
+Structural checks prove the pass rewrites exactly on positive evidence
+(R1 alias law, R2 inline law) and never without it; Eval checks prove
+the generated encoding is injective on the shapes elm-review needs.
+-}
+
+import Array exposing ( Array )
+import Ast.Eval as Eval exposing ( Outcome(..), Value(..) )
+import Ast.KeyEncode as KeyEncode exposing ( KeyShape(..) )
+import Ast.Types exposing
+    ( Declaration(..)
+    , Expr(..)
+    , File
+    , ModuleKind(..)
+    , Exposing(..)
+    , Pattern(..)
+    , TypeAnn(..)
+    )
+import Dict
+
+
+type alias Check =
+    { name : String
+    , passed : Bool
+    , details : String
+    }
+
+
+tests : Array Check
+tests =
+    [ r1AliasBecomesString
+    , r1ConstructionEncoded
+    , r1DictAnnotationLeftToAlias
+    , r1IneligibleWhenAliasIsArgument
+    , r2FieldAnnotationRewritten
+    , r2MemberKeyEncoded
+    , r2UnprovenDictUntouched
+    , encoderInjectiveOnStringPair
+    , encoderInjectiveOnIntPair
+    , encoderMatchesLiteralAndLambda
+    ]
+
+
+ok : String -> Check
+ok name =
+    { name = name, passed = True, details = "" }
+
+
+fail : String -> String -> Check
+fail name details =
+    { name = name, passed = False, details = details }
+
+
+
+-- FIXTURE ---------------------------------------------------------------------
+
+
+intType : TypeAnn
+intType =
+    TypeTyped { ref = { moduleName = Nothing, name = "Int" }, arguments = [] }
+
+
+stringType : TypeAnn
+stringType =
+    TypeTyped { ref = { moduleName = Nothing, name = "String" }, arguments = [] }
+
+
+rangeLikeRef : TypeAnn
+rangeLikeRef =
+    TypeTyped { ref = { moduleName = Nothing, name = "RangeLike" }, arguments = [] }
+
+
+dictOf : TypeAnn -> TypeAnn -> TypeAnn
+dictOf key value =
+    TypeTyped
+        { ref = { moduleName = Nothing, name = "Dict" }
+        , arguments = [ key, value ]
+        }
+
+
+bare : String -> Expr
+bare name =
+    ExprVar { moduleName = Nothing, name = name }
+
+
+fixtureModule : Array Declaration -> File
+fixtureModule declarations =
+    { schemaVersion = 1
+    , moduleDefinition =
+        { kind = NormalModule
+        , moduleName = "Fixture"
+        , exposing_ = ExposeAll
+        }
+    , comments = []
+    , imports = []
+    , declarations = declarations
+    }
+
+
+{-| The elm-review shape, reduced:
+
+    type alias RangeLike = ( Int, Int )
+    type Table = Table (Dict RangeLike String)
+    toRangeLike : Int -> Int -> RangeLike
+    toRangeLike a b = ( a, b )
+    look : Int -> Int -> Dict RangeLike String -> Maybe String
+    look a b dict = Dict.get (toRangeLike a b) dict
+-}
+r1Declarations : Array Declaration
+r1Declarations =
+    [ DeclAlias
+        { name = "RangeLike"
+        , documentation = Nothing
+        , generics = []
+        , typeAnnotation = TypeTuple [ intType, intType ]
+        }
+    , DeclCustomType
+        { name = "Table"
+        , documentation = Nothing
+        , generics = []
+        , constructors =
+            [ { name = "Table", arguments = [ dictOf rangeLikeRef stringType ] } ]
+        }
+    , DeclFunction
+        { name = "toRangeLike"
+        , documentation = Nothing
+        , signature =
+            Just
+                { name = "toRangeLike"
+                , typeAnnotation =
+                    TypeFunction
+                        { left = intType
+                        , right = TypeFunction { left = intType, right = rangeLikeRef }
+                        }
+                }
+        , arguments = [ PatVar "a", PatVar "b" ]
+        , expression = ExprTuple [ bare "a", bare "b" ]
+        }
+    , DeclFunction
+        { name = "look"
+        , documentation = Nothing
+        , signature = Nothing
+        , arguments = [ PatVar "a", PatVar "b", PatVar "dict" ]
+        , expression =
+            ExprApplication
+                [ ExprVar { moduleName = Just "Dict", name = "get" }
+                , ExprApplication [ bare "toRangeLike", bare "a", bare "b" ]
+                , bare "dict"
+                ]
+        }
+    ]
+
+
+r1Applied : File
+r1Applied =
+    let
+        file =
+            fixtureModule r1Declarations
+    in
+    KeyEncode.apply (KeyEncode.collectEvidence [ file ]) file
+
+
+declNamed : String -> File -> Maybe Declaration
+declNamed wanted file =
+    Array.foldl
+        (\declaration found ->
+            when found is
+                Just _ ->
+                    found
+
+                Nothing ->
+                    when declaration is
+                        DeclAlias { name = name } ->
+                            if name == wanted then
+                                Just declaration
+
+                            else
+                                Nothing
+
+                        DeclFunction { name = name } ->
+                            if name == wanted then
+                                Just declaration
+
+                            else
+                                Nothing
+
+                        DeclCustomType { name = name } ->
+                            if name == wanted then
+                                Just declaration
+
+                            else
+                                Nothing
+
+                        _ ->
+                            Nothing
+        )
+        Nothing
+        file.declarations
+
+
+
+-- R1 CHECKS -------------------------------------------------------------------
+
+
+r1AliasBecomesString : Check
+r1AliasBecomesString =
+    when declNamed "RangeLike" r1Applied is
+        Just (DeclAlias { typeAnnotation = TypeTyped { ref = { name = "String" } } }) ->
+            ok "r1AliasBecomesString"
+
+        other ->
+            fail "r1AliasBecomesString" ("got: " ++ Debug.toString other)
+
+
+r1ConstructionEncoded : Check
+r1ConstructionEncoded =
+    when declNamed "toRangeLike" r1Applied is
+        Just (DeclFunction { expression = ExprTuple _ }) ->
+            fail "r1ConstructionEncoded" "tail tuple literal was not encoded"
+
+        Just (DeclFunction { expression = ExprBinop { operator = "++" } }) ->
+            ok "r1ConstructionEncoded"
+
+        other ->
+            fail "r1ConstructionEncoded" ("got: " ++ Debug.toString other)
+
+
+{-| The Dict annotation refers to the alias — no inline rewrite happens
+there; the alias itself carries the String through.
+-}
+r1DictAnnotationLeftToAlias : Check
+r1DictAnnotationLeftToAlias =
+    let
+        payload =
+            when declNamed "Table" r1Applied is
+                Just (DeclCustomType { constructors = constructors }) ->
+                    Array.get 0 constructors
+                        |> Maybe.andThen (\ctor -> Array.get 0 ctor.arguments)
+
+                _ ->
+                    Nothing
+    in
+    when payload is
+        Just (TypeTyped { ref = { name = "Dict" }, arguments = [ TypeTyped { ref = { name = "RangeLike" } }, _ ] }) ->
+            ok "r1DictAnnotationLeftToAlias"
+
+        other ->
+            fail "r1DictAnnotationLeftToAlias" ("got: " ++ Debug.toString other)
+
+
+{-| Adding `useIt : RangeLike -> Int` (argument position) must poison
+eligibility: nothing rewrites.
+-}
+r1IneligibleWhenAliasIsArgument : Check
+r1IneligibleWhenAliasIsArgument =
+    let
+        file =
+            fixtureModule
+                (Array.pushLast
+                    (DeclFunction
+                        { name = "useIt"
+                        , documentation = Nothing
+                        , signature =
+                            Just
+                                { name = "useIt"
+                                , typeAnnotation =
+                                    TypeFunction { left = rangeLikeRef, right = intType }
+                                }
+                        , arguments = [ PatVar "r" ]
+                        , expression = ExprInt 0
+                        }
+                    )
+                    r1Declarations
+                )
+
+        applied =
+            KeyEncode.apply (KeyEncode.collectEvidence [ file ]) file
+    in
+    when declNamed "RangeLike" applied is
+        Just (DeclAlias { typeAnnotation = TypeTuple _ }) ->
+            when declNamed "toRangeLike" applied is
+                Just (DeclFunction { expression = ExprTuple _ }) ->
+                    ok "r1IneligibleWhenAliasIsArgument"
+
+                other ->
+                    fail "r1IneligibleWhenAliasIsArgument"
+                        ("tails touched despite poison: " ++ Debug.toString other)
+
+        other ->
+            fail "r1IneligibleWhenAliasIsArgument"
+                ("alias rewritten despite poison: " ++ Debug.toString other)
+
+
+
+-- R2 CHECKS -------------------------------------------------------------------
+
+
+{-| The suppressions shape, reduced:
+
+    type alias Options = { suppressions : Dict ( String, String ) Int }
+    check : Options -> Bool
+    check options =
+        Dict.member ( options.rule, options.path ) options.suppressions
+-}
+r2Declarations : Array Declaration
+r2Declarations =
+    [ DeclAlias
+        { name = "Options"
+        , documentation = Nothing
+        , generics = []
+        , typeAnnotation =
+            TypeRecord
+                [ { name = "suppressions"
+                  , typeAnnotation =
+                        dictOf (TypeTuple [ stringType, stringType ]) intType
+                  }
+                ]
+        }
+    , DeclFunction
+        { name = "check"
+        , documentation = Nothing
+        , signature = Nothing
+        , arguments = [ PatVar "options" ]
+        , expression =
+            ExprApplication
+                [ ExprVar { moduleName = Just "Dict", name = "member" }
+                , ExprTuple
+                    [ ExprAccess { record = bare "options", field = "rule" }
+                    , ExprAccess { record = bare "options", field = "path" }
+                    ]
+                , ExprAccess { record = bare "options", field = "suppressions" }
+                ]
+        }
+    ]
+
+
+r2Applied : File
+r2Applied =
+    let
+        file =
+            fixtureModule r2Declarations
+    in
+    KeyEncode.apply (KeyEncode.collectEvidence [ file ]) file
+
+
+r2FieldAnnotationRewritten : Check
+r2FieldAnnotationRewritten =
+    let
+        fieldAnn =
+            when declNamed "Options" r2Applied is
+                Just (DeclAlias { typeAnnotation = TypeRecord fields }) ->
+                    Array.get 0 fields
+                        |> Maybe.map .typeAnnotation
+
+                _ ->
+                    Nothing
+    in
+    when fieldAnn is
+        Just (TypeTyped { arguments = [ TypeTyped { ref = { name = "String" } }, _ ] }) ->
+            ok "r2FieldAnnotationRewritten"
+
+        other ->
+            fail "r2FieldAnnotationRewritten" ("got: " ++ Debug.toString other)
+
+
+r2MemberKeyEncoded : Check
+r2MemberKeyEncoded =
+    when declNamed "check" r2Applied is
+        Just (DeclFunction { expression = ExprApplication [ _, ExprTuple _, _ ] }) ->
+            fail "r2MemberKeyEncoded" "member key left as a tuple literal"
+
+        Just (DeclFunction { expression = ExprApplication [ _, ExprBinop { operator = "++" }, _ ] }) ->
+            ok "r2MemberKeyEncoded"
+
+        other ->
+            fail "r2MemberKeyEncoded" ("got: " ++ Debug.toString other)
+
+
+{-| A Dict.member on an UNPROVEN dict (plain var, no evidence) keeps its
+tuple key.
+-}
+r2UnprovenDictUntouched : Check
+r2UnprovenDictUntouched =
+    let
+        file =
+            fixtureModule
+                [ DeclFunction
+                    { name = "check"
+                    , documentation = Nothing
+                    , signature = Nothing
+                    , arguments = [ PatVar "somewhere" ]
+                    , expression =
+                        ExprApplication
+                            [ ExprVar { moduleName = Just "Dict", name = "member" }
+                            , ExprTuple [ bare "x", bare "y" ]
+                            , bare "somewhere"
+                            ]
+                    }
+                ]
+
+        applied =
+            KeyEncode.apply (KeyEncode.collectEvidence [ file ]) file
+    in
+    when declNamed "check" applied is
+        Just (DeclFunction { expression = ExprApplication [ _, ExprTuple _, _ ] }) ->
+            ok "r2UnprovenDictUntouched"
+
+        other ->
+            fail "r2UnprovenDictUntouched" ("got: " ++ Debug.toString other)
+
+
+
+-- BEHAVIOR (Eval oracle on the emitted encoding) ------------------------------
+
+
+evalToString : Expr -> Result String String
+evalToString expr =
+    when Eval.run Eval.emptyContext 10000 expr is
+        Done (VString s) ->
+            Ok s
+
+        Done _ ->
+            Err "non-string result"
+
+        Crashed message ->
+            Err ("crashed: " ++ message)
+
+        Stuck reason ->
+            Err ("stuck: " ++ reason)
+
+
+distinctEncodings : String -> Expr -> Expr -> Check
+distinctEncodings name left right =
+    when { l = evalToString left, r = evalToString right } is
+        { l = Ok a, r = Ok b } ->
+            if a == b then
+                fail name ("collision: both encode to " ++ a)
+
+            else
+                ok name
+
+        { l = Err e } ->
+            fail name ("left: " ++ e)
+
+        { r = Err e } ->
+            fail name ("right: " ++ e)
+
+
+{-| ("ab","c") vs ("a","bc") — naive concatenation collides; the
+length-prefix must not.
+-}
+encoderInjectiveOnStringPair : Check
+encoderInjectiveOnStringPair =
+    distinctEncodings "encoderInjectiveOnStringPair"
+        (KeyEncode.encodeTupleLiteral [ KString, KString ]
+            [ ExprString "ab", ExprString "c" ]
+        )
+        (KeyEncode.encodeTupleLiteral [ KString, KString ]
+            [ ExprString "a", ExprString "bc" ]
+        )
+
+
+{-| (12,3) vs (1,23). -}
+encoderInjectiveOnIntPair : Check
+encoderInjectiveOnIntPair =
+    distinctEncodings "encoderInjectiveOnIntPair"
+        (KeyEncode.encodeTupleLiteral [ KInt, KInt ]
+            [ ExprInt 12, ExprInt 3 ]
+        )
+        (KeyEncode.encodeTupleLiteral [ KInt, KInt ]
+            [ ExprInt 1, ExprInt 23 ]
+        )
+
+
+{-| The inline literal path and the destructuring-lambda path must agree
+byte-for-byte (both feed the same Dict).
+-}
+encoderMatchesLiteralAndLambda : Check
+encoderMatchesLiteralAndLambda =
+    let
+        viaLiteral =
+            KeyEncode.encodeTupleLiteral [ KInt, KString ]
+                [ ExprInt 7, ExprString "x:y" ]
+
+        viaLambda =
+            ExprApplication
+                [ KeyEncode.encoderLambda [ KInt, KString ]
+                , ExprTuple [ ExprInt 7, ExprString "x:y" ]
+                ]
+    in
+    when { l = evalToString viaLiteral, r = evalToString viaLambda } is
+        { l = Ok a, r = Ok b } ->
+            if a == b then
+                ok "encoderMatchesLiteralAndLambda"
+
+            else
+                fail "encoderMatchesLiteralAndLambda" (a ++ " /= " ++ b)
+
+        { l = Err e } ->
+            fail "encoderMatchesLiteralAndLambda" ("literal: " ++ e)
+
+        { r = Err e } ->
+            fail "encoderMatchesLiteralAndLambda" ("lambda: " ++ e)

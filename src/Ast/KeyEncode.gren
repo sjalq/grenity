@@ -1,0 +1,1308 @@
+module Ast.KeyEncode exposing
+    ( Evidence
+    , KeyShape(..)
+    , apply
+    , collectEvidence
+    , emptyEvidence
+    , encodableShape
+    , encodeTupleLiteral
+    , encoderLambda
+    )
+
+{-| D24b: Elm tuples are `comparable` so they serve as Dict keys / Set
+members; the port lowers tuples to records and Gren records are not
+comparable, so every tuple-keyed Dict/Set type-errors after the port.
+
+This pass rewrites PROVEN tuple keys to an injective String encoding,
+running right after TupleCompare (pre-NameSub: Elm names, tuples intact).
+
+Evidence law — rewrite ONLY on positive evidence, never on guesses:
+
+R1 (alias law): a `type alias K = ( enc, enc )` where EVERY occurrence of
+K in the package is either a Dict/Set KEY position or the RETURN position
+of a function whose tail expressions are all tuple literals. Then the
+alias body becomes String and each constructing tail is wrapped in the
+encoder. Every Dict/Set over K follows through the alias with zero
+call-site rewrites (jfmengels/elm-review's RangeLike).
+
+R2 (inline law): `Dict ( enc, enc ) v` / `Set ( enc, enc )` written
+inline in a signature or record-alias field becomes `Dict String v` /
+`Set String`, and key arguments at call sites whose dict/set argument is
+proven (a signature-typed variable or a proven record field access) are
+wrapped in the encoder (elm-review's `suppressions` field).
+
+Encodable element types: Int, Float, Char, String, and nested tuples
+thereof — concrete names required (type variables / custom types /
+records are never encodable; those sites stay untouched and fail
+gren-verify exactly as before this pass).
+
+Encoding: length-prefixed concatenation, injective without escaping:
+
+    lp s = String.fromInt (String.length s) ++ ":" ++ s
+    key (a, b) = lp (enc a) ++ lp (enc b)
+
+Ordering caveat (ledgered): the encoded order differs from Elm's tuple
+order, so `Dict.toList` iteration order can differ. R1 eligibility
+forbids reading keys back by construction; R2 sites that iterate keys
+receive the encoded strings and surface as type errors, never silent
+wrong values.
+-}
+
+import Array exposing ( Array )
+import Ast.Types exposing
+    ( Declaration(..)
+    , Expr(..)
+    , File
+    , Pattern(..)
+    , TypeAnn(..)
+    )
+import Ast.Walk as Walk
+import Dict exposing ( Dict )
+
+
+{-| Concrete encodable shape of one tuple element. -}
+type KeyShape
+    = KInt
+    | KFloat
+    | KChar
+    | KString
+    | KNested (Array KeyShape)
+
+
+type alias AliasInfo =
+    { shapes : Array KeyShape
+    , homeModule : String
+    }
+
+
+type alias Evidence =
+    { -- R1: eligible tuple aliases by bare name
+      aliases : Dict String AliasInfo
+    , -- R2: record-alias field name -> proven inline tuple key shapes
+      dictFields : Dict String (Array KeyShape)
+    }
+
+
+emptyEvidence : Evidence
+emptyEvidence =
+    { aliases = Dict.empty
+    , dictFields = Dict.empty
+    }
+
+
+
+-- SHAPES ----------------------------------------------------------------------
+
+
+{-| Concrete encodable shape of a type annotation, if any. -}
+encodableShape : TypeAnn -> Maybe KeyShape
+encodableShape annotation =
+    when annotation is
+        TypeTyped { ref = ref, arguments = [] } ->
+            if ref.name == "Int" && basicsQualified ref.moduleName then
+                Just KInt
+
+            else if ref.name == "Float" && basicsQualified ref.moduleName then
+                Just KFloat
+
+            else if
+                ref.name == "Char"
+                    && (ref.moduleName == Nothing || ref.moduleName == Just "Char")
+            then
+                Just KChar
+
+            else if
+                ref.name == "String"
+                    && (ref.moduleName == Nothing || ref.moduleName == Just "String")
+            then
+                Just KString
+
+            else
+                Nothing
+
+        TypeTuple elements ->
+            tupleShapes elements
+                |> Maybe.map KNested
+
+        _ ->
+            Nothing
+
+
+basicsQualified : Maybe String -> Bool
+basicsQualified moduleName =
+    moduleName == Nothing || moduleName == Just "Basics"
+
+
+tupleShapes : Array TypeAnn -> Maybe (Array KeyShape)
+tupleShapes elements =
+    Array.foldl
+        (\element acc ->
+            when acc is
+                Nothing ->
+                    Nothing
+
+                Just shapes ->
+                    encodableShape element
+                        |> Maybe.map (\shape -> Array.pushLast shape shapes)
+        )
+        (Just [])
+        elements
+
+
+{-| Inline tuple key of a `Dict k v` / `Set k` annotation node. -}
+inlineTupleKey : TypeAnn -> Maybe (Array KeyShape)
+inlineTupleKey annotation =
+    when keySlot annotation is
+        Just (TypeTuple elements) ->
+            tupleShapes elements
+
+        _ ->
+            Nothing
+
+
+{-| The key-slot child annotation of a Dict/Set node. -}
+keySlot : TypeAnn -> Maybe TypeAnn
+keySlot annotation =
+    when annotation is
+        TypeTyped { ref = ref, arguments = arguments } ->
+            if isDictRef ref && Array.length arguments == 2 then
+                Array.get 0 arguments
+
+            else if isSetRef ref && Array.length arguments == 1 then
+                Array.get 0 arguments
+
+            else
+                Nothing
+
+        _ ->
+            Nothing
+
+
+isDictRef : Ast.Types.NamedRef -> Bool
+isDictRef ref =
+    ref.name == "Dict" && (ref.moduleName == Nothing || ref.moduleName == Just "Dict")
+
+
+isSetRef : Ast.Types.NamedRef -> Bool
+isSetRef ref =
+    ref.name == "Set" && (ref.moduleName == Nothing || ref.moduleName == Just "Set")
+
+
+stringAnn : TypeAnn
+stringAnn =
+    TypeTyped { ref = { moduleName = Nothing, name = "String" }, arguments = [] }
+
+
+
+-- EVIDENCE COLLECTION ---------------------------------------------------------
+
+
+{-| Alias occurrence classification while walking annotation trees. -}
+type alias UsageCounts =
+    { keyUses : Int
+    , returnUses : Int
+    , otherUses : Int
+    }
+
+
+noUses : UsageCounts
+noUses =
+    { keyUses = 0, returnUses = 0, otherUses = 0 }
+
+
+collectEvidence : Array File -> Evidence
+collectEvidence files =
+    let
+        candidates =
+            collectCandidateAliases files
+
+        usage =
+            Array.foldl (fileUsage candidates) Dict.empty files
+
+        returningOk =
+            aliasReturnLawHolds candidates files
+
+        destructured =
+            destructuredAliasNames candidates files
+
+        eligible =
+            Dict.foldl
+                (\name info acc ->
+                    let
+                        counts =
+                            Dict.get name usage
+                                |> Maybe.withDefault noUses
+                    in
+                    if
+                        counts.keyUses
+                            >= 1
+                            && counts.otherUses
+                            == 0
+                            && Dict.member name returningOk
+                            && not (Dict.member name destructured)
+                    then
+                        Dict.set name info acc
+
+                    else
+                        acc
+                )
+                Dict.empty
+                candidates
+    in
+    { aliases = eligible
+    , dictFields = collectDictFields files
+    }
+
+
+{-| Aliases whose body is a tuple of encodable elements. Name collisions
+with differing shapes drop the name entirely (bare-name matching must be
+unambiguous package-wide).
+-}
+collectCandidateAliases : Array File -> Dict String AliasInfo
+collectCandidateAliases files =
+    let
+        gathered =
+            Array.foldl
+                (\file acc ->
+                    Array.foldl
+                        (\declaration inner ->
+                            when declaration is
+                                DeclAlias { name = name, generics = [], typeAnnotation = TypeTuple elements } ->
+                                    when tupleShapes elements is
+                                        Just shapes ->
+                                            Dict.update name
+                                                (\existing ->
+                                                    when existing is
+                                                        Nothing ->
+                                                            Just
+                                                                (Just
+                                                                    { shapes = shapes
+                                                                    , homeModule = file.moduleDefinition.moduleName
+                                                                    }
+                                                                )
+
+                                                        Just _ ->
+                                                            -- duplicate name: poison
+                                                            Just Nothing
+                                                )
+                                                inner
+
+                                        Nothing ->
+                                            inner
+
+                                _ ->
+                                    inner
+                        )
+                        acc
+                        file.declarations
+                )
+                Dict.empty
+                files
+    in
+    Dict.foldl
+        (\name entry acc ->
+            when entry is
+                Just info ->
+                    Dict.set name info acc
+
+                Nothing ->
+                    acc
+        )
+        Dict.empty
+        gathered
+
+
+{-| Does this annotation reference the candidate alias `name`? Bare refs
+match anywhere (candidate names are package-unique); qualified refs match
+when the qualifier is the home module or its last segment (import alias
+convention `import A.B.C as C`).
+-}
+refersToAlias : String -> AliasInfo -> TypeAnn -> Bool
+refersToAlias name info annotation =
+    when annotation is
+        TypeTyped { ref = ref, arguments = [] } ->
+            if ref.name /= name then
+                False
+
+            else
+                when ref.moduleName is
+                    Nothing ->
+                        True
+
+                    Just qualifier ->
+                        qualifier
+                            == info.homeModule
+                            || Just qualifier
+                            == lastSegment info.homeModule
+
+        _ ->
+            False
+
+
+lastSegment : String -> Maybe String
+lastSegment moduleName =
+    String.split "." moduleName
+        |> Array.last
+
+
+{-| Classify every occurrence of every candidate alias across a file's
+type annotations.
+-}
+fileUsage :
+    Dict String AliasInfo
+    -> File
+    -> Dict String UsageCounts
+    -> Dict String UsageCounts
+fileUsage candidates file usage =
+    Array.foldl
+        (\declaration acc ->
+            when declaration is
+                DeclFunction { signature = Just sig } ->
+                    signatureUsage candidates sig.typeAnnotation acc
+
+                DeclAlias { name = name, typeAnnotation = annotation } ->
+                    if Dict.member name candidates then
+                        -- the candidate's own definition is not a use
+                        acc
+
+                    else
+                        annUsage candidates { isKey = False } annotation acc
+
+                DeclCustomType { constructors = constructors } ->
+                    Array.foldl
+                        (\ctor inner ->
+                            Array.foldl
+                                (\argument deeper ->
+                                    annUsage candidates { isKey = False } argument deeper
+                                )
+                                inner
+                                ctor.arguments
+                        )
+                        acc
+                        constructors
+
+                DeclPort sig ->
+                    annUsage candidates { isKey = False } sig.typeAnnotation acc
+
+                _ ->
+                    acc
+        )
+        usage
+        file.declarations
+
+
+{-| A signature's spine: argument annotations are plain positions; the
+final return annotation is a RETURN position for a directly-referenced
+candidate alias.
+-}
+signatureUsage :
+    Dict String AliasInfo
+    -> TypeAnn
+    -> Dict String UsageCounts
+    -> Dict String UsageCounts
+signatureUsage candidates annotation usage =
+    when annotation is
+        TypeFunction { left = left, right = right } ->
+            signatureUsage candidates right (annUsage candidates { isKey = False } left usage)
+
+        _ ->
+            when directAliasName candidates annotation is
+                Just name ->
+                    bumpUsage name (\c -> { c | returnUses = c.returnUses + 1 }) usage
+
+                Nothing ->
+                    annUsage candidates { isKey = False } annotation usage
+
+
+directAliasName : Dict String AliasInfo -> TypeAnn -> Maybe String
+directAliasName candidates annotation =
+    Dict.foldl
+        (\name info found ->
+            when found is
+                Just _ ->
+                    found
+
+                Nothing ->
+                    if refersToAlias name info annotation then
+                        Just name
+
+                    else
+                        Nothing
+        )
+        Nothing
+        candidates
+
+
+{-| Walk an annotation tree counting candidate-alias occurrences; direct
+children in a Dict/Set key slot are KEY positions.
+-}
+annUsage :
+    Dict String AliasInfo
+    -> { isKey : Bool }
+    -> TypeAnn
+    -> Dict String UsageCounts
+    -> Dict String UsageCounts
+annUsage candidates position annotation usage =
+    let
+        self =
+            when directAliasName candidates annotation is
+                Just name ->
+                    if position.isKey then
+                        bumpUsage name (\c -> { c | keyUses = c.keyUses + 1 }) usage
+
+                    else
+                        bumpUsage name (\c -> { c | otherUses = c.otherUses + 1 }) usage
+
+                Nothing ->
+                    usage
+    in
+    when annotation is
+        TypeTyped { ref = ref, arguments = arguments } ->
+            let
+                -- Index-based: only slot 0 of a keyed container is a key
+                -- position (`Dict K K`'s value slot must stay `other`).
+                hasKeySlot =
+                    (isDictRef ref && Array.length arguments == 2)
+                        || (isSetRef ref && Array.length arguments == 1)
+            in
+            Array.indexedFoldl
+                (\index argument acc ->
+                    annUsage candidates
+                        { isKey = hasKeySlot && index == 0 }
+                        argument
+                        acc
+                )
+                self
+                arguments
+
+        TypeTuple elements ->
+            Array.foldl (annUsage candidates { isKey = False }) self elements
+
+        TypeRecord fields ->
+            Array.foldl
+                (\field acc -> annUsage candidates { isKey = False } field.typeAnnotation acc)
+                self
+                fields
+
+        TypeGenericRecord { fields = fields } ->
+            Array.foldl
+                (\field acc -> annUsage candidates { isKey = False } field.typeAnnotation acc)
+                self
+                fields
+
+        TypeFunction { left = left, right = right } ->
+            annUsage candidates
+                { isKey = False }
+                right
+                (annUsage candidates { isKey = False } left self)
+
+        _ ->
+            self
+
+
+bumpUsage :
+    String
+    -> (UsageCounts -> UsageCounts)
+    -> Dict String UsageCounts
+    -> Dict String UsageCounts
+bumpUsage name bump usage =
+    Dict.set name
+        (bump (Dict.get name usage |> Maybe.withDefault noUses))
+        usage
+
+
+{-| R1 return law: every function whose signature returns a candidate
+alias must have ONLY tuple-literal tail expressions (we must be able to
+wrap every construction). Returns the set of alias names for which the
+law holds across the package.
+-}
+aliasReturnLawHolds : Dict String AliasInfo -> Array File -> Dict String {}
+aliasReturnLawHolds candidates files =
+    let
+        violated =
+            Array.foldl
+                (\file acc ->
+                    Array.foldl
+                        (\declaration inner ->
+                            when declaration is
+                                DeclFunction { signature = Just sig, expression = expression } ->
+                                    when returnedAliasName candidates sig.typeAnnotation is
+                                        Just name ->
+                                            if allTailsAreTuples expression then
+                                                inner
+
+                                            else
+                                                Dict.set name {} inner
+
+                                        Nothing ->
+                                            inner
+
+                                _ ->
+                                    inner
+                        )
+                        acc
+                        file.declarations
+                )
+                Dict.empty
+                files
+    in
+    Dict.foldl
+        (\name _ acc ->
+            if Dict.member name violated then
+                acc
+
+            else
+                Dict.set name {} acc
+        )
+        Dict.empty
+        candidates
+
+
+returnedAliasName : Dict String AliasInfo -> TypeAnn -> Maybe String
+returnedAliasName candidates annotation =
+    when annotation is
+        TypeFunction { right = right } ->
+            returnedAliasName candidates right
+
+        _ ->
+            directAliasName candidates annotation
+
+
+allTailsAreTuples : Expr -> Bool
+allTailsAreTuples expr =
+    when expr is
+        ExprTuple _ ->
+            True
+
+        ExprLet { expression = body } ->
+            allTailsAreTuples body
+
+        ExprIf { then_ = then_, else_ = else_ } ->
+            allTailsAreTuples then_ && allTailsAreTuples else_
+
+        ExprCase { cases = arms } ->
+            Array.all (\arm -> allTailsAreTuples arm.body) arms
+
+        _ ->
+            False
+
+
+{-| Cheap destructuring guard: a candidate alias is ineligible when any
+tuple pattern destructures the direct result of a function returning it
+(`case toRangeLike x is ( a, b ) -> …` / `let ( a, b ) = toRangeLike x`).
+Deeper flows are not provable here and stay ledgered under D24b.
+-}
+destructuredAliasNames : Dict String AliasInfo -> Array File -> Dict String {}
+destructuredAliasNames candidates files =
+    let
+        returners =
+            Array.foldl
+                (\file acc ->
+                    Array.foldl
+                        (\declaration inner ->
+                            when declaration is
+                                DeclFunction { name = name, signature = Just sig } ->
+                                    when returnedAliasName candidates sig.typeAnnotation is
+                                        Just aliasName ->
+                                            Dict.set name aliasName inner
+
+                                        Nothing ->
+                                            inner
+
+                                _ ->
+                                    inner
+                        )
+                        acc
+                        file.declarations
+                )
+                Dict.empty
+                files
+    in
+    Array.foldl
+        (\file acc ->
+            Array.foldl
+                (\declaration inner ->
+                    when declaration is
+                        DeclFunction { expression = expression } ->
+                            scanDestructures returners expression inner
+
+                        _ ->
+                            inner
+                )
+                acc
+                file.declarations
+        )
+        Dict.empty
+        files
+
+
+scanDestructures :
+    Dict String String
+    -> Expr
+    -> Dict String {}
+    -> Dict String {}
+scanDestructures returners expr acc =
+    let
+        callAlias called =
+            when called is
+                ExprApplication parts ->
+                    when Array.get 0 parts is
+                        Just (ExprVar ref) ->
+                            Dict.get ref.name returners
+
+                        _ ->
+                            Nothing
+
+                _ ->
+                    Nothing
+
+        hasTuplePat pattern =
+            when pattern is
+                PatTuple _ ->
+                    True
+
+                PatAs { pattern = inner } ->
+                    hasTuplePat inner
+
+                _ ->
+                    False
+
+        self =
+            when expr is
+                ExprCase { expression = scrutinee, cases = arms } ->
+                    when callAlias scrutinee is
+                        Just aliasName ->
+                            if Array.any (\arm -> hasTuplePat arm.pattern) arms then
+                                Dict.set aliasName {} acc
+
+                            else
+                                acc
+
+                        Nothing ->
+                            acc
+
+                ExprLet { declarations = declarations } ->
+                    Array.foldl
+                        (\letDecl inner ->
+                            when letDecl is
+                                Ast.Types.LetDestructure { pattern = pattern, expression = rhs } ->
+                                    when callAlias rhs is
+                                        Just aliasName ->
+                                            if hasTuplePat pattern then
+                                                Dict.set aliasName {} inner
+
+                                            else
+                                                inner
+
+                                        Nothing ->
+                                            inner
+
+                                _ ->
+                                    inner
+                        )
+                        acc
+                        declarations
+
+                _ ->
+                    acc
+    in
+    Walk.foldExprChildren (\child inner -> scanDestructures returners child inner) self expr
+
+
+{-| R2 field evidence: record-alias fields typed `Dict ( enc, enc ) v` /
+`Set ( enc, enc )`. Field-name collisions with differing shapes drop the
+field name.
+-}
+collectDictFields : Array File -> Dict String (Array KeyShape)
+collectDictFields files =
+    let
+        gathered =
+            Array.foldl
+                (\file acc ->
+                    Array.foldl
+                        (\declaration inner ->
+                            when declaration is
+                                DeclAlias { typeAnnotation = TypeRecord fields } ->
+                                    Array.foldl (recordFieldEvidence) inner fields
+
+                                _ ->
+                                    inner
+                        )
+                        acc
+                        file.declarations
+                )
+                Dict.empty
+                files
+    in
+    Dict.foldl
+        (\name entry acc ->
+            when entry is
+                Just shapes ->
+                    Dict.set name shapes acc
+
+                Nothing ->
+                    acc
+        )
+        Dict.empty
+        gathered
+
+
+recordFieldEvidence :
+    Ast.Types.RecordFieldType
+    -> Dict String (Maybe (Array KeyShape))
+    -> Dict String (Maybe (Array KeyShape))
+recordFieldEvidence field acc =
+    when inlineTupleKey field.typeAnnotation is
+        Just shapes ->
+            Dict.update field.name
+                (\existing ->
+                    when existing is
+                        Nothing ->
+                            Just (Just shapes)
+
+                        Just (Just previous) ->
+                            if previous == shapes then
+                                Just (Just previous)
+
+                            else
+                                Just Nothing
+
+                        Just Nothing ->
+                            Just Nothing
+                )
+                acc
+
+        Nothing ->
+            acc
+
+
+
+-- APPLY -----------------------------------------------------------------------
+
+
+apply : Evidence -> File -> File
+apply evidence file =
+    if Dict.isEmpty evidence.aliases && Dict.isEmpty evidence.dictFields then
+        file
+
+    else
+        { file
+            | declarations =
+                Array.map (applyDeclaration evidence file.moduleDefinition.moduleName)
+                    file.declarations
+        }
+
+
+applyDeclaration : Evidence -> String -> Declaration -> Declaration
+applyDeclaration evidence moduleName declaration =
+    when declaration is
+        DeclAlias alias ->
+            DeclAlias
+                { alias
+                    | typeAnnotation =
+                        rewriteAliasBody evidence moduleName alias
+                }
+
+        DeclFunction fn ->
+            let
+                returnShapes =
+                    fn.signature
+                        |> Maybe.andThen
+                            (\sig -> returnedAliasName evidence.aliases sig.typeAnnotation)
+                        |> Maybe.andThen
+                            (\name -> Dict.get name evidence.aliases)
+                        |> Maybe.map .shapes
+
+                withTails =
+                    when returnShapes is
+                        Just shapes ->
+                            rewriteTails (encodeTail shapes) fn.expression
+
+                        Nothing ->
+                            fn.expression
+
+                env =
+                    envFromSignature evidence fn.signature fn.arguments
+            in
+            DeclFunction
+                { fn
+                    | signature =
+                        Maybe.map
+                            (\sig ->
+                                { sig | typeAnnotation = rewriteAnn sig.typeAnnotation }
+                            )
+                            fn.signature
+                    , expression = rewriteExpr env withTails
+                }
+
+        DeclCustomType custom ->
+            DeclCustomType
+                { custom
+                    | constructors =
+                        Array.map
+                            (\ctor ->
+                                { ctor | arguments = Array.map rewriteAnn ctor.arguments }
+                            )
+                            custom.constructors
+                }
+
+        _ ->
+            declaration
+
+
+{-| R1: the eligible alias's own body (in its home module) becomes String.
+-}
+rewriteAliasBody :
+    Evidence
+    -> String
+    -> { name : String
+       , documentation : Maybe String
+       , generics : Array String
+       , typeAnnotation : TypeAnn
+       }
+    -> TypeAnn
+rewriteAliasBody evidence moduleName alias =
+    when Dict.get alias.name evidence.aliases is
+        Just info ->
+            if info.homeModule == moduleName then
+                stringAnn
+
+            else
+                rewriteAnn alias.typeAnnotation
+
+        Nothing ->
+            rewriteAnn alias.typeAnnotation
+
+
+{-| R2: inline tuple keys of Dict/Set become String, everywhere in the
+annotation tree.
+-}
+rewriteAnn : TypeAnn -> TypeAnn
+rewriteAnn annotation =
+    when annotation is
+        TypeTyped { ref = ref, arguments = arguments } ->
+            let
+                rewritten =
+                    Array.map rewriteAnn arguments
+
+                keyed =
+                    if isDictRef ref || isSetRef ref then
+                        Array.indexedMap
+                            (\index argument ->
+                                if index == 0 && inlineKeyOfArgs ref arguments /= Nothing then
+                                    stringAnn
+
+                                else
+                                    argument
+                            )
+                            rewritten
+
+                    else
+                        rewritten
+            in
+            TypeTyped { ref = ref, arguments = keyed }
+
+        TypeTuple elements ->
+            TypeTuple (Array.map rewriteAnn elements)
+
+        TypeRecord fields ->
+            TypeRecord
+                (Array.map
+                    (\field ->
+                        { field | typeAnnotation = rewriteAnn field.typeAnnotation }
+                    )
+                    fields
+                )
+
+        TypeGenericRecord generic ->
+            TypeGenericRecord
+                { generic
+                    | fields =
+                        Array.map
+                            (\field ->
+                                { field | typeAnnotation = rewriteAnn field.typeAnnotation }
+                            )
+                            generic.fields
+                }
+
+        TypeFunction { left = left, right = right } ->
+            TypeFunction { left = rewriteAnn left, right = rewriteAnn right }
+
+        _ ->
+            annotation
+
+
+inlineKeyOfArgs : Ast.Types.NamedRef -> Array TypeAnn -> Maybe (Array KeyShape)
+inlineKeyOfArgs ref arguments =
+    inlineTupleKey (TypeTyped { ref = ref, arguments = arguments })
+
+
+{-| Wrap one tail expression: tuple literals encode inline; anything
+else is left alone (eligibility proved literals-only, so this is total
+for eligible aliases).
+-}
+encodeTail : Array KeyShape -> Expr -> Expr
+encodeTail shapes expr =
+    when expr is
+        ExprTuple items ->
+            encodeTupleLiteral shapes items
+
+        _ ->
+            expr
+
+
+{-| Rewrite the tail positions of a body (through let / if / case). -}
+rewriteTails : (Expr -> Expr) -> Expr -> Expr
+rewriteTails f expr =
+    when expr is
+        ExprLet inner ->
+            ExprLet { inner | expression = rewriteTails f inner.expression }
+
+        ExprIf { condition = condition, then_ = then_, else_ = else_ } ->
+            ExprIf
+                { condition = condition
+                , then_ = rewriteTails f then_
+                , else_ = rewriteTails f else_
+                }
+
+        ExprCase { expression = scrutinee, cases = arms } ->
+            ExprCase
+                { expression = scrutinee
+                , cases =
+                    Array.map
+                        (\arm -> { arm | body = rewriteTails f arm.body })
+                        arms
+                }
+
+        _ ->
+            f expr
+
+
+
+-- R2 CALL-SITE REWRITE --------------------------------------------------------
+
+
+type alias Env =
+    { -- signature-typed variables holding a tuple-keyed Dict/Set
+      dictVars : Dict String (Array KeyShape)
+    , dictFields : Dict String (Array KeyShape)
+    }
+
+
+envFromSignature :
+    Evidence
+    -> Maybe { name : String, typeAnnotation : TypeAnn }
+    -> Array Pattern
+    -> Env
+envFromSignature evidence signature arguments =
+    let
+        empty =
+            { dictVars = Dict.empty, dictFields = evidence.dictFields }
+    in
+    when signature is
+        Nothing ->
+            empty
+
+        Just sig ->
+            Array.foldl
+                (\argument state ->
+                    when state.spine is
+                        TypeFunction { left = left, right = right } ->
+                            { spine = right
+                            , env = bindDictPattern argument left state.env
+                            }
+
+                        _ ->
+                            state
+                )
+                { spine = sig.typeAnnotation, env = empty }
+                arguments
+                |> .env
+
+
+bindDictPattern : Pattern -> TypeAnn -> Env -> Env
+bindDictPattern pattern annotation env =
+    when pattern is
+        PatVar name ->
+            when inlineTupleKey annotation is
+                Just shapes ->
+                    { env | dictVars = Dict.set name shapes env.dictVars }
+
+                Nothing ->
+                    env
+
+        _ ->
+            env
+
+
+rewriteExpr : Env -> Expr -> Expr
+rewriteExpr env expr =
+    let
+        rewritten =
+            rewriteNode env expr
+    in
+    Walk.mapExprChildren (rewriteExpr env) rewritten
+
+
+rewriteNode : Env -> Expr -> Expr
+rewriteNode env expr =
+    when expr is
+        ExprApplication parts ->
+            rewriteCall env parts
+                |> Maybe.withDefault expr
+
+        ExprBinop { operator = "|>", left = left, right = ExprApplication parts } ->
+            when rewriteCall env (Array.pushLast left parts) is
+                Just (ExprApplication newParts) ->
+                    when Array.popLast newParts is
+                        Just { initial = initial, last = last } ->
+                            ExprBinop
+                                { operator = "|>"
+                                , left = last
+                                , right = ExprApplication initial
+                                }
+
+                        Nothing ->
+                            expr
+
+                _ ->
+                    expr
+
+        _ ->
+            expr
+
+
+{-| Key-taking Dict/Set calls: the key argument index and the dict/set
+argument index per function, at full saturation.
+-}
+rewriteCall : Env -> Array Expr -> Maybe Expr
+rewriteCall env parts =
+    when Array.get 0 parts is
+        Just (ExprVar ref) ->
+            keyCallSpec ref
+                |> Maybe.andThen
+                    (\spec ->
+                        if Array.length parts /= spec.arity + 1 then
+                            Nothing
+
+                        else
+                            Array.get spec.containerIndex parts
+                                |> Maybe.andThen (containerShapes env)
+                                |> Maybe.andThen
+                                    (\shapes ->
+                                        Array.get spec.keyIndex parts
+                                            |> Maybe.map
+                                                (\key ->
+                                                    ExprApplication
+                                                        (Array.indexedMap
+                                                            (\index part ->
+                                                                if index == spec.keyIndex then
+                                                                    encodeKeyExpr shapes key
+
+                                                                else
+                                                                    part
+                                                            )
+                                                            parts
+                                                        )
+                                                )
+                                    )
+                    )
+
+        _ ->
+            Nothing
+
+
+{-| key/container argument positions (1-based within `parts`, where
+index 0 is the function itself).
+-}
+keyCallSpec :
+    Ast.Types.NamedRef
+    -> Maybe { arity : Int, keyIndex : Int, containerIndex : Int }
+keyCallSpec ref =
+    let
+        dictFn =
+            ref.moduleName == Just "Dict"
+
+        setFn =
+            ref.moduleName == Just "Set"
+    in
+    if dictFn && (ref.name == "get" || ref.name == "member" || ref.name == "remove") then
+        Just { arity = 2, keyIndex = 1, containerIndex = 2 }
+
+    else if dictFn && (ref.name == "insert" || ref.name == "update") then
+        Just { arity = 3, keyIndex = 1, containerIndex = 3 }
+
+    else if setFn && (ref.name == "member" || ref.name == "insert" || ref.name == "remove") then
+        Just { arity = 2, keyIndex = 1, containerIndex = 2 }
+
+    else
+        Nothing
+
+
+{-| Positive evidence that a dict/set expression is tuple-keyed. -}
+containerShapes : Env -> Expr -> Maybe (Array KeyShape)
+containerShapes env expr =
+    when expr is
+        ExprVar { moduleName = Nothing, name = name } ->
+            Dict.get name env.dictVars
+
+        ExprAccess { field = field } ->
+            Dict.get field env.dictFields
+
+        _ ->
+            Nothing
+
+
+
+-- ENCODER EMISSION ------------------------------------------------------------
+
+
+{-| Encode a key expression of known shape: tuple literals inline; any
+other expression through a destructuring lambda.
+-}
+encodeKeyExpr : Array KeyShape -> Expr -> Expr
+encodeKeyExpr shapes key =
+    when key is
+        ExprTuple items ->
+            if Array.length items == Array.length shapes then
+                encodeTupleLiteral shapes items
+
+            else
+                ExprApplication [ encoderLambda shapes, key ]
+
+        _ ->
+            ExprApplication [ encoderLambda shapes, key ]
+
+
+{-| `\( d24k0_0, d24k0_1 ) -> <encoding>` — the pipeline lowers the tuple
+pattern downstream exactly like source-level Elm lambdas.
+-}
+encoderLambda : Array KeyShape -> Expr
+encoderLambda shapes =
+    encoderLambdaAt 0 shapes
+
+
+encoderLambdaAt : Int -> Array KeyShape -> Expr
+encoderLambdaAt depth shapes =
+    let
+        binder index =
+            "d24k" ++ String.fromInt depth ++ "_" ++ String.fromInt index
+
+        pattern =
+            PatTuple
+                (Array.indexedMap (\index _ -> PatVar (binder index)) shapes)
+
+        components =
+            Array.indexedMap
+                (\index _ -> bareVar (binder index))
+                shapes
+    in
+    ExprLambda
+        { arguments = [ pattern ]
+        , expression = encodeComponentsAt depth shapes components
+        }
+
+
+{-| lp (enc s0 e0) ++ lp (enc s1 e1) ++ … -}
+encodeTupleLiteral : Array KeyShape -> Array Expr -> Expr
+encodeTupleLiteral shapes items =
+    encodeComponentsAt 0 shapes items
+
+
+encodeComponentsAt : Int -> Array KeyShape -> Array Expr -> Expr
+encodeComponentsAt depth shapes items =
+    let
+        pieces =
+            Array.indexedMap
+                (\index item ->
+                    when Array.get index shapes is
+                        Just shape ->
+                            lengthPrefixed depth index (encodeComponent depth shape item)
+
+                        Nothing ->
+                            -- unreachable: shapes and items are same-length
+                            item
+                )
+                items
+    in
+    when Array.popFirst pieces is
+        Nothing ->
+            ExprString ""
+
+        Just { first = first, rest = rest } ->
+            Array.foldl
+                (\piece acc ->
+                    ExprBinop { operator = "++", left = acc, right = piece }
+                )
+                first
+                rest
+
+
+encodeComponent : Int -> KeyShape -> Expr -> Expr
+encodeComponent depth shape component =
+    when shape is
+        KString ->
+            component
+
+        KInt ->
+            ExprApplication [ stringFn "fromInt", component ]
+
+        KFloat ->
+            ExprApplication [ stringFn "fromFloat", component ]
+
+        KChar ->
+            ExprApplication [ stringFn "fromChar", component ]
+
+        KNested nested ->
+            when component is
+                ExprTuple items ->
+                    if Array.length items == Array.length nested then
+                        encodeComponentsAt (depth + 1) nested items
+
+                    else
+                        ExprApplication [ encoderLambdaAt (depth + 1) nested, component ]
+
+                _ ->
+                    ExprApplication [ encoderLambdaAt (depth + 1) nested, component ]
+
+
+{-| `(\d24p<depth>_<index> -> String.fromInt (String.length s) ++ ":" ++ s) piece`
+— the piece is used twice, so it is bound once through a lambda.
+-}
+lengthPrefixed : Int -> Int -> Expr -> Expr
+lengthPrefixed depth index piece =
+    let
+        name =
+            "d24p" ++ String.fromInt depth ++ "_" ++ String.fromInt index
+    in
+    ExprApplication
+        [ ExprLambda
+            { arguments = [ PatVar name ]
+            , expression =
+                ExprBinop
+                    { operator = "++"
+                    , left =
+                        ExprApplication
+                            [ stringFn "fromInt"
+                            , ExprApplication [ stringFn "length", bareVar name ]
+                            ]
+                    , right =
+                        ExprBinop
+                            { operator = "++"
+                            , left = ExprString ":"
+                            , right = bareVar name
+                            }
+                    }
+            }
+        , piece
+        ]
+
+
+stringFn : String -> Expr
+stringFn name =
+    ExprVar { moduleName = Just "String", name = name }
+
+
+bareVar : String -> Expr
+bareVar name =
+    ExprVar { moduleName = Nothing, name = name }

@@ -544,6 +544,9 @@ builtinFor ref =
         "String.fromInt" ->
             builtin "String.fromInt" 1
 
+        "String.length" ->
+            builtin "String.length" 1
+
         "Basics.identity" ->
             builtin "identity" 1
 
@@ -696,6 +699,11 @@ runBuiltin context fuel name args =
 
         { name = "String.fromInt", args = [ VInt n ] } ->
             done fuel (VString (String.fromInt n))
+
+        { name = "String.length", args = [ VString s ] } ->
+            -- Elm String.length (P1 evaluates pre-NameSub ASTs; the ported
+            -- name is String.count, the semantics here are unit count).
+            done fuel (VInt (String.count s))
 
         { name = "compare", args = [ left, right ] } ->
             -- D24 comparators are generated in terms of Basics.compare;

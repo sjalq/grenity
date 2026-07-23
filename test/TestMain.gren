@@ -11,6 +11,7 @@ import Ast.ReservedTest
 import Ast.RecordAliasTest
 import Ast.TransformLawTest
 import Ast.IndexClampTest
+import Ast.KeyEncodeTest
 import Ast.MatchCompileTest
 import Ast.TupleCompareTest
 import Elm.ManifestTest
@@ -101,6 +102,7 @@ allChecks =
     , Ast.TupleCompareTest.tests
     , Ast.IndexClampTest.tests
     , Ast.MatchCompileTest.tests
+    , Ast.KeyEncodeTest.tests
     , MappingSemanticsTest.tests
     , Mapping.Tests.checks
         |> Array.map

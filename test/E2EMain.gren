@@ -200,6 +200,7 @@ runScenario runtime spec =
             , vendor = False
             , withTests = False
             , extractCache = True
+            , portedCache = True
             }
     in
     Orchestrator.run runtime.context runtime.permissions options

@@ -44,6 +44,9 @@ type alias Options =
     , -- Reuse cached elm-review extraction output for immutable registry
       -- packages. `--no-extract-cache` sets this False to force fresh runs.
       extractCache : Bool
+    , -- Reuse cached ported+verified dependency trees for immutable registry
+      -- packages. `--no-ported-cache` sets this False to force fresh ports.
+      portedCache : Bool
     }
 
 
@@ -65,6 +68,7 @@ type alias ParseState =
     , vendor : Bool
     , withTests : Bool
     , extractCache : Bool
+    , portedCache : Bool
     }
 
 
@@ -107,6 +111,7 @@ parse defaults rawArguments =
             , vendor = selection.vendor
             , withTests = False
             , extractCache = True
+            , portedCache = True
             }
     in
     if selection.vendor then
@@ -170,6 +175,9 @@ parseArguments state arguments =
 
                 "--no-extract-cache" ->
                     parseArguments { state | extractCache = False } rest
+
+                "--no-ported-cache" ->
+                    parseArguments { state | portedCache = False } rest
 
                 "--json" ->
                     parseArguments { state | json = True } rest
@@ -309,6 +317,7 @@ finalize state =
                     , vendor = state.vendor
                     , withTests = state.withTests
                     , extractCache = state.extractCache
+                    , portedCache = state.portedCache
                     }
 
 
@@ -339,6 +348,7 @@ Options:
       --mapping <file>       Add or override mappings; may be repeated
       --offline              Use cached registry data only
       --no-extract-cache     Ignore the elm-review extraction cache; re-extract
+      --no-ported-cache      Ignore the ported dependency cache; re-port deps
       --with-tests           Extract and transform root package tests separately
       --json                 Print the final report as JSON
   -h, --help                 Show this help

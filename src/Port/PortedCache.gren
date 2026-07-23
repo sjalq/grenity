@@ -1,0 +1,544 @@
+module Port.PortedCache exposing
+    ( Coordinate
+    , Key
+    , Pending
+    , canonicalInput
+    , coordinateLabel
+    , digest12
+    , digestFor
+    , entryPath
+    , keyFor
+    , load
+    , loadPlatform
+    , platformLabel
+    , store
+    )
+
+{-| Content-addressed cache of fully ported, gren-verified package trees for
+immutable registry dependencies.
+
+A registry package at a fixed `author/name@version` produces identical Gren
+output for a fixed tool version, mappings set, platform label, and namespacing
+flag. Repeat ports reuse the verified tree and skip transform + verify. The
+cache key combines the package coordinate with a SHA-256 digest of those
+transform inputs: any drift invalidates the entry.
+
+Local-path inputs and the root package are never cached (see `keyFor`). Store
+is only called on the success path after gren verification.
+-}
+
+import Bytes exposing (Bytes)
+import Bytes.Decode as BytesDecode
+import ChildProcess
+import Crypto
+import Dict
+import FileSystem
+import FileSystem.Path as Path exposing (Path)
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Math
+import Node
+import Port.Error as PortError
+import System.File
+import System.Process
+import Task exposing (Task)
+
+
+{-| The immutable package identity a ported tree belongs to.
+-}
+type alias Coordinate =
+    { author : String
+    , name : String
+    , version : String
+    }
+
+
+{-| Everything needed to locate a cached ported package. `cacheRoot` is the
+tool's top-level cache directory; ported trees live under its `ported/`
+subdirectory.
+-}
+type alias Key =
+    { cacheRoot : Path
+    , coordinate : Coordinate
+    }
+
+
+{-| Remembered after a cache miss so the verified package directory can be
+stored once gren verification succeeds.
+-}
+type alias Pending =
+    { cacheRoot : Path
+    , coordinate : Coordinate
+    , digest : String
+    }
+
+
+{-| Build a cache key. Returns `Nothing` when caching is disabled
+(`--no-ported-cache`), when the source is a local path (`sourceUrl` is
+`Nothing`), or when the package is the port root: local sources are mutable
+and the root is always freshly ported.
+-}
+keyFor : Bool -> Path -> Coordinate -> Maybe String -> Bool -> Maybe Key
+keyFor enabled cacheRoot coordinate sourceUrl isRoot =
+    if not enabled then
+        Nothing
+
+    else if isRoot then
+        Nothing
+
+    else
+        when sourceUrl is
+            Nothing ->
+                Nothing
+
+            Just _ ->
+                Just
+                    { cacheRoot = cacheRoot
+                    , coordinate = coordinate
+                    }
+
+
+{-| Human-readable `author/name@version` for progress notes.
+-}
+coordinateLabel : Coordinate -> String
+coordinateLabel coordinate =
+    coordinate.author ++ "/" ++ coordinate.name ++ "@" ++ coordinate.version
+
+
+{-| Map a CLI platform choice onto the digest vocabulary: "pure", "browser",
+or "node". `Auto` is treated as pure (the Gren default host) so an explicit
+`--platform` selection always changes the digest.
+-}
+platformLabel : String -> String
+platformLabel platform =
+    when String.toLower platform is
+        "common" ->
+            "pure"
+
+        "auto" ->
+            "pure"
+
+        "browser" ->
+            "browser"
+
+        "node" ->
+            "node"
+
+        "pure" ->
+            "pure"
+
+        other ->
+            other
+
+
+{-| First 12 hex characters of a full digest; used in entry directory names.
+-}
+digest12 : String -> String
+digest12 fullDigest =
+    String.slice 0 12 fullDigest
+
+
+{-| `<cacheRoot>/ported/<author>__<name>__<version>__<digest12>/`.
+-}
+entryPath : Path -> Coordinate -> String -> Path
+entryPath cacheRoot coordinate fullDigest =
+    Path.join
+        [ cacheRoot
+        , Path.fromPosixString "ported"
+        , Path.fromPosixString (entryDirectoryName coordinate fullDigest)
+        ]
+
+
+entryDirectoryName : Coordinate -> String -> String
+entryDirectoryName coordinate fullDigest =
+    coordinate.author
+        ++ "__"
+        ++ coordinate.name
+        ++ "__"
+        ++ coordinate.version
+        ++ "__"
+        ++ digest12 fullDigest
+
+
+{-| Canonical digest payload. Order is fixed and documented:
+
+1. tool version string
+2. sha256 of every `mappings/*.json` file (sorted by filename), one line each
+3. platform string (`pure` / `browser` / `node`)
+4. namespacing flag
+
+Any transform-relevant drift in these ingredients must change the digest.
+-}
+canonicalInput : String -> Array { filename : String, contentSha256 : String } -> String -> Bool -> String
+canonicalInput toolVersion mappingFiles platform namespacing =
+    let
+        mappingLines =
+            mappingFiles
+                |> Array.sortBy .filename
+                |> Array.map (\file -> file.filename ++ ":" ++ file.contentSha256)
+                |> String.join "\n"
+
+        namespaceLine =
+            if namespacing then
+                "namespace:true"
+
+            else
+                "namespace:false"
+    in
+    String.join "\n---ported-cache---\n"
+        [ "tool:" ++ toolVersion
+        , "mappings:\n" ++ mappingLines
+        , "platform:" ++ platform
+        , namespaceLine
+        ]
+
+
+{-| SHA-256 hex digest over the fixed ingredient set. Returns `""` when any
+ingredient is unreadable so the caller falls back to a fresh port rather than
+reuse a possibly-stale entry.
+-}
+digestFor : FileSystem.Permission -> Path -> String -> String -> Bool -> Task x String
+digestFor permission mappingsDirectory toolVersion platform namespacing =
+    System.File.listFilesRecursively permission mappingsDirectory
+        |> Task.andThen
+            (\paths ->
+                paths
+                    |> Array.keepIf isMappingJson
+                    |> Array.sortBy Path.toPosixString
+                    |> hashMappingFiles permission
+            )
+        |> Task.andThen
+            (\mappingFiles ->
+                sha256Hex (canonicalInput toolVersion mappingFiles platform namespacing)
+            )
+        |> Task.onError (\_ -> Task.succeed "")
+
+
+isMappingJson : Path -> Bool
+isMappingJson path =
+    let
+        text =
+            Path.toPosixString path
+    in
+    String.endsWith ".json" text
+
+
+hashMappingFiles : FileSystem.Permission -> Array Path -> Task PortError.Error (Array { filename : String, contentSha256 : String })
+hashMappingFiles permission paths =
+    Array.foldl
+        (\path pending ->
+            pending
+                |> Task.andThen
+                    (\acc ->
+                        System.File.readText permission path
+                            |> Task.andThen
+                                (\contents ->
+                                    sha256Hex contents
+                                        |> Task.map
+                                            (\contentSha ->
+                                                Array.pushLast
+                                                    { filename = Path.filenameWithExtension path
+                                                    , contentSha256 = contentSha
+                                                    }
+                                                    acc
+                                            )
+                                )
+                    )
+        )
+        (Task.succeed [])
+        paths
+
+
+{-| Read a cached ported package. Returns `Nothing` on a miss, missing
+manifest, or digest mismatch: the caller re-ports. The entry path already
+embeds `digest12`; the full digest in `manifest.json` is checked against the
+current computation so a truncated-name collision cannot serve wrong content.
+-}
+load : FileSystem.Permission -> Path -> String -> Task x (Maybe Path)
+load permission entry expectedDigest =
+    let
+        manifestPath =
+            Path.join [ entry, Path.fromPosixString "manifest.json" ]
+    in
+    System.File.exists permission entry
+        |> Task.andThen
+            (\present ->
+                if not present then
+                    Task.succeed Nothing
+
+                else
+                    System.File.readText permission manifestPath
+                        |> Task.map
+                            (\contents ->
+                                when Decode.decodeString manifestDecoder contents is
+                                    Ok manifest ->
+                                        if manifest.digest == expectedDigest then
+                                            Just entry
+
+                                        else
+                                            Nothing
+
+                                    Err _ ->
+                                        Nothing
+                            )
+                        |> Task.onError (\_ -> Task.succeed Nothing)
+            )
+        |> Task.onError (\_ -> Task.succeed Nothing)
+
+
+type alias Manifest =
+    { toolVersion : String
+    , digest : String
+    , platform : String
+    }
+
+
+manifestDecoder : Decode.Decoder Manifest
+manifestDecoder =
+    Decode.map3
+        (\toolVersion digest platform ->
+            { toolVersion = toolVersion
+            , digest = digest
+            , platform = platform
+            }
+        )
+        (Decode.field "toolVersion" Decode.string)
+        (Decode.field "digest" Decode.string)
+        (Decode.oneOf
+            [ Decode.field "platform" Decode.string
+            , Decode.succeed "common"
+            ]
+        )
+
+
+{-| Read the cached package platform label from manifest.json (common/browser/node).
+Returns Nothing when the entry is missing or the digest does not match.
+-}
+loadPlatform : FileSystem.Permission -> Path -> String -> Task x (Maybe String)
+loadPlatform permission entry expectedDigest =
+    let
+        manifestPath =
+            Path.join [ entry, Path.fromPosixString "manifest.json" ]
+    in
+    System.File.readText permission manifestPath
+        |> Task.map
+            (\contents ->
+                when Decode.decodeString manifestDecoder contents is
+                    Ok manifest ->
+                        if manifest.digest == expectedDigest then
+                            Just manifest.platform
+
+                        else
+                            Nothing
+
+                    Err _ ->
+                        Nothing
+            )
+        |> Task.onError (\_ -> Task.succeed Nothing)
+
+
+{-| Persist a verified package tree under the content-addressed entry path.
+Copies only the transform surface (src/, LICENSE*), never gren.json (which is
+resolution-specific), never `elm-stuff` / `.gren` build litter. Writes to a
+unique sibling temp directory then renames it into place (adopt-the-winner on
+conflict). I/O failures are swallowed: the cache is an optimization, not a
+correctness dependency.
+-}
+store :
+    Node.Platform
+    -> ChildProcess.Permission
+    -> FileSystem.Permission
+    -> Path
+    -> Path
+    -> String
+    -> String
+    -> String
+    -> Task x {}
+store platform childProcess permission entry sourcePackageDir toolVersion digest platformName =
+    freshUuid
+        |> Task.andThen
+            (\maybeUuid ->
+                when maybeUuid is
+                    Nothing ->
+                        Task.succeed {}
+
+                    Just uuid ->
+                        let
+                            tempPath =
+                                tempSibling entry uuid
+
+                            -- Store only the transform surface (src/ + LICENSE*).
+                            -- gren.json is resolution-specific (local: dep versions)
+                            -- and is always re-planned on the hit path; caching it
+                            -- would serve the wrong dep graph across projects.
+                            manifestText =
+                                Encode.object
+                                    [ { key = "toolVersion", value = Encode.string toolVersion }
+                                    , { key = "digest", value = Encode.string digest }
+                                    , { key = "platform", value = Encode.string platformName }
+                                    ]
+                                    |> Encode.encode 0
+                        in
+                        System.File.ensureDirectory permission
+                            (Path.parentPath entry |> Maybe.withDefault Path.empty)
+                            |> Task.andThen (\_ -> System.File.ensureDirectory permission tempPath)
+                            |> Task.andThen
+                                (\_ ->
+                                    copyPackageSurface platform childProcess sourcePackageDir tempPath
+                                )
+                            |> Task.andThen
+                                (\_ ->
+                                    System.File.writeText permission
+                                        (Path.join [ tempPath, Path.fromPosixString "manifest.json" ])
+                                        manifestText
+                                        |> Task.map (\_ -> {})
+                                )
+                            |> Task.andThen
+                                (\_ ->
+                                    renameInto permission entry tempPath
+                                )
+                            |> Task.onError (\_ -> removeIfExists permission tempPath)
+            )
+        |> Task.onError (\_ -> Task.succeed {})
+
+
+{-| Best-effort native recursive copy of the transform surface (src/ + LICENSE*)
+into `destination`, excluding build caches and gren.json (resolution-specific).
+Failures are swallowed by `store`.
+-}
+copyPackageSurface : Node.Platform -> ChildProcess.Permission -> Path -> Path -> Task PortError.Error {}
+copyPackageSurface platform childProcess source destination =
+    let
+        src =
+            System.File.pathToString platform source
+
+        dest =
+            System.File.pathToString platform destination
+    in
+    System.Process.run childProcess
+        { program = "bash"
+        , arguments =
+            [ "-c"
+            , "set -e; "
+                ++ "if [ -d '"
+                ++ src
+                ++ "/src' ]; then cp -a '"
+                ++ src
+                ++ "/src' '"
+                ++ dest
+                ++ "/'; fi; "
+                ++ "for f in LICENSE LICENSE.txt LICENSE.adoc; do "
+                ++ "if [ -f '"
+                ++ src
+                ++ "/'$f ]; then cp -a '"
+                ++ src
+                ++ "/'$f '"
+                ++ dest
+                ++ "/'; fi; done"
+            ]
+        , workingDirectory = "."
+        , environment = Dict.empty
+        , allowedExitCodes = [ 0 ]
+        , timeoutMilliseconds = 60 * 1000
+        , maximumOutputBytes = 1024 * 1024
+        }
+        |> Task.map (\_ -> {})
+        |> Task.mapError
+            (\_ ->
+                PortError.create "PORTED_CACHE_COPY_FAILED"
+                    ("Could not copy package surface from " ++ src ++ " to " ++ dest ++ ".")
+            )
+
+
+freshUuid : Task x (Maybe String)
+freshUuid =
+    Crypto.getSecureContext
+        |> Task.andThen Crypto.randomUuidV4
+        |> Task.map Just
+        |> Task.onError (\_ -> Task.succeed Nothing)
+
+
+renameInto : FileSystem.Permission -> Path -> Path -> Task x {}
+renameInto permission destination tempPath =
+    -- `move new old` renames old -> new (atomic on POSIX). A racing writer that
+    -- already published the destination just wins; drop our temp and adopt it.
+    FileSystem.move permission destination tempPath
+        |> Task.map (\_ -> {})
+        |> Task.onError (\_ -> removeIfExists permission tempPath)
+
+
+tempSibling : Path -> String -> Path
+tempSibling path uuid =
+    let
+        parent =
+            Path.parentPath path
+                |> Maybe.withDefault Path.empty
+
+        name =
+            "." ++ Path.filenameWithExtension path ++ ".tmp-" ++ uuid
+    in
+    Path.join [ parent, Path.fromPosixString name ]
+
+
+removeIfExists : FileSystem.Permission -> Path -> Task x {}
+removeIfExists permission path =
+    System.File.exists permission path
+        |> Task.andThen
+            (\present ->
+                if present then
+                    FileSystem.remove permission { recursive = True } path
+                        |> Task.map (\_ -> {})
+
+                else
+                    Task.succeed {}
+            )
+        |> Task.onError (\_ -> Task.succeed {})
+
+
+sha256Hex : String -> Task x String
+sha256Hex input =
+    Crypto.getSecureContext
+        |> Task.andThen
+            (\context ->
+                Crypto.digest context Crypto.Sha256 (Bytes.fromString input)
+            )
+        |> Task.map (\digestBytes -> Maybe.withDefault "" (bytesToHex digestBytes))
+        |> Task.onError (\_ -> Task.succeed "")
+
+
+bytesToHex : Bytes -> Maybe String
+bytesToHex bytes =
+    BytesDecode.decode
+        (BytesDecode.loop
+            { remaining = Bytes.length bytes, output = [] }
+            (\state ->
+                if state.remaining <= 0 then
+                    BytesDecode.succeed (BytesDecode.Done (String.join "" state.output))
+
+                else
+                    BytesDecode.unsignedInt8
+                        |> BytesDecode.map
+                            (\byte ->
+                                BytesDecode.Loop
+                                    { remaining = state.remaining - 1
+                                    , output = Array.pushLast (hexByte byte) state.output
+                                    }
+                            )
+            )
+        )
+        bytes
+
+
+hexByte : Int -> String
+hexByte value =
+    let
+        digits =
+            "0123456789abcdef"
+
+        high =
+            value // 16
+
+        low =
+            Math.modBy 16 value
+    in
+    String.slice high (high + 1) digits ++ String.slice low (low + 1) digits

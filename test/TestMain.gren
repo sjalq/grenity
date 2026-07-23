@@ -25,6 +25,7 @@ import Mapping.Tests
 import MappingSemanticsTest
 import Node
 import Resolve.SolverTest
+import Port.PortedCacheTest
 import Review.RunnerTest
 import Stream.Log
 import Task exposing (Task)
@@ -87,6 +88,7 @@ allChecks =
     , Transform.SourceEditTest.tests
     , Resolve.SolverTest.tests
     , Review.RunnerTest.tests
+    , Port.PortedCacheTest.tests
     , Ast.BareResolveTest.tests
     , Ast.CtorLawTest.tests
     , Ast.EvalPropTest.tests

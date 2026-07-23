@@ -1,0 +1,286 @@
+module Port.PortedCacheTest exposing (tests)
+
+{-| Pure checks for the content-addressed ported-dependency cache key math
+(`Port.PortedCache`). The IO paths (digest, load, store) are exercised by the
+architect's E2E/canary proofs; here we pin the decisions that must never
+regress: which inputs are cacheable, entry-path stability, and that each
+digest ingredient changes the canonical payload.
+-}
+
+import Array exposing (Array)
+import Debug
+import FileSystem.Path as Path exposing (Path)
+import Port.PortedCache as PortedCache
+
+
+type alias TestResult =
+    { name : String
+    , passed : Bool
+    , details : String
+    }
+
+
+tests : Array TestResult
+tests =
+    [ disabledCachingYieldsNoKey
+    , localPathYieldsNoKey
+    , rootPackageYieldsNoKey
+    , registryDepYieldsKey
+    , keyCarriesCoordinateAndRoot
+    , coordinateLabelIsCanonical
+    , entryPathLayout
+    , entryPathStability
+    , distinctDigestsDoNotCollide
+    , digestSensitiveToToolVersion
+    , digestSensitiveToMappingContent
+    , digestSensitiveToPlatform
+    , digestSensitiveToNamespacing
+    , platformLabelMapsCommonToPure
+    , platformLabelMapsBrowser
+    , platformLabelMapsNode
+    , digest12IsPrefix
+    ]
+
+
+cacheRoot : Path
+cacheRoot =
+    Path.fromPosixString "/home/user/.cache/elm-to-gren"
+
+
+exampleCoordinate : PortedCache.Coordinate
+exampleCoordinate =
+    { author = "elm-community"
+    , name = "maybe-extra"
+    , version = "5.3.0"
+    }
+
+
+exampleMappings : Array { filename : String, contentSha256 : String }
+exampleMappings =
+    [ { filename = "builtin.json", contentSha256 = "aaa111" }
+    , { filename = "test-framework.json", contentSha256 = "bbb222" }
+    ]
+
+
+disabledCachingYieldsNoKey : TestResult
+disabledCachingYieldsNoKey =
+    PortedCache.keyFor False cacheRoot exampleCoordinate (Just "https://example.com/pkg.zip") False
+        |> isNothing
+        |> outcome
+            "--no-ported-cache disables the cache key even for a registry dependency"
+            "Expected Nothing when caching is disabled."
+
+
+localPathYieldsNoKey : TestResult
+localPathYieldsNoKey =
+    PortedCache.keyFor True cacheRoot exampleCoordinate Nothing False
+        |> isNothing
+        |> outcome
+            "a local-path source (no sourceUrl) is never cached"
+            "Expected Nothing when the source has no registry URL."
+
+
+rootPackageYieldsNoKey : TestResult
+rootPackageYieldsNoKey =
+    PortedCache.keyFor True cacheRoot exampleCoordinate (Just "https://example.com/pkg.zip") True
+        |> isNothing
+        |> outcome
+            "the root package is never cached even when it is a registry package"
+            "Expected Nothing when isRoot is True."
+
+
+registryDepYieldsKey : TestResult
+registryDepYieldsKey =
+    when PortedCache.keyFor True cacheRoot exampleCoordinate (Just "https://example.com/pkg.zip") False is
+        Just _ ->
+            outcome "an enabled registry dependency produces a cache key" "" True
+
+        Nothing ->
+            outcome "an enabled registry dependency produces a cache key" "Expected Just key." False
+
+
+keyCarriesCoordinateAndRoot : TestResult
+keyCarriesCoordinateAndRoot =
+    when PortedCache.keyFor True cacheRoot exampleCoordinate (Just "https://example.com/pkg.zip") False is
+        Just key ->
+            expectEqual
+                "the cache key carries the package coordinate and cache root verbatim"
+                { root = Path.toPosixString cacheRoot, coordinate = exampleCoordinate }
+                { root = Path.toPosixString key.cacheRoot, coordinate = key.coordinate }
+
+        Nothing ->
+            outcome "the cache key carries the package coordinate and cache root verbatim" "Expected Just key." False
+
+
+coordinateLabelIsCanonical : TestResult
+coordinateLabelIsCanonical =
+    PortedCache.coordinateLabel exampleCoordinate
+        |> expectEqual "coordinateLabel renders author/name@version" "elm-community/maybe-extra@5.3.0"
+
+
+entryPathLayout : TestResult
+entryPathLayout =
+    PortedCache.entryPath cacheRoot exampleCoordinate "deadbeefcafebabe0123456789abcdef"
+        |> Path.toPosixString
+        |> expectEqual
+            "entryPath nests <author>__<name>__<version>__<digest12>/ under ported/"
+            "/home/user/.cache/elm-to-gren/ported/elm-community__maybe-extra__5.3.0__deadbeefcafe"
+
+
+entryPathStability : TestResult
+entryPathStability =
+    let
+        first =
+            PortedCache.entryPath cacheRoot exampleCoordinate "aaaaaaaaaaaaaaaa"
+                |> Path.toPosixString
+
+        second =
+            PortedCache.entryPath cacheRoot exampleCoordinate "aaaaaaaaaaaaaaaa"
+                |> Path.toPosixString
+    in
+    outcome
+        "entryPath is stable for the same coordinate and digest"
+        ("Paths differed: " ++ first ++ " vs " ++ second)
+        (first == second)
+
+
+distinctDigestsDoNotCollide : TestResult
+distinctDigestsDoNotCollide =
+    let
+        pathFor digest =
+            PortedCache.entryPath cacheRoot exampleCoordinate digest
+                |> Path.toPosixString
+    in
+    outcome
+        "a changed digest changes the entry path, so stale entries cannot be reused"
+        ("Both digests produced " ++ pathFor "aaaa")
+        (pathFor "aaaaaaaaaaaa" /= pathFor "bbbbbbbbbbbb")
+
+
+digestSensitiveToToolVersion : TestResult
+digestSensitiveToToolVersion =
+    let
+        base =
+            PortedCache.canonicalInput "0.1.0" exampleMappings "pure" False
+
+        changed =
+            PortedCache.canonicalInput "0.2.0" exampleMappings "pure" False
+    in
+    outcome
+        "digest payload changes when the tool version changes"
+        "Tool version change did not alter the canonical input."
+        (base /= changed)
+
+
+digestSensitiveToMappingContent : TestResult
+digestSensitiveToMappingContent =
+    let
+        base =
+            PortedCache.canonicalInput "0.1.0" exampleMappings "pure" False
+
+        alteredMappings =
+            [ { filename = "builtin.json", contentSha256 = "changed-sha" }
+            , { filename = "test-framework.json", contentSha256 = "bbb222" }
+            ]
+
+        changed =
+            PortedCache.canonicalInput "0.1.0" alteredMappings "pure" False
+    in
+    outcome
+        "digest payload changes when a mappings file's content hash changes"
+        "Mappings content change did not alter the canonical input."
+        (base /= changed)
+
+
+digestSensitiveToPlatform : TestResult
+digestSensitiveToPlatform =
+    let
+        purePayload =
+            PortedCache.canonicalInput "0.1.0" exampleMappings "pure" False
+
+        browserPayload =
+            PortedCache.canonicalInput "0.1.0" exampleMappings "browser" False
+
+        nodePayload =
+            PortedCache.canonicalInput "0.1.0" exampleMappings "node" False
+    in
+    outcome
+        "digest payload changes when the platform string changes"
+        "Platform change did not alter the canonical input."
+        (purePayload /= browserPayload && browserPayload /= nodePayload && purePayload /= nodePayload)
+
+
+digestSensitiveToNamespacing : TestResult
+digestSensitiveToNamespacing =
+    let
+        without =
+            PortedCache.canonicalInput "0.1.0" exampleMappings "pure" False
+
+        withNs =
+            PortedCache.canonicalInput "0.1.0" exampleMappings "pure" True
+    in
+    outcome
+        "digest payload changes when the namespacing flag changes"
+        "Namespacing change did not alter the canonical input."
+        (without /= withNs)
+
+
+platformLabelMapsCommonToPure : TestResult
+platformLabelMapsCommonToPure =
+    PortedCache.platformLabel "common"
+        |> expectEqual "platformLabel maps common to pure" "pure"
+
+
+platformLabelMapsBrowser : TestResult
+platformLabelMapsBrowser =
+    PortedCache.platformLabel "browser"
+        |> expectEqual "platformLabel maps browser" "browser"
+
+
+platformLabelMapsNode : TestResult
+platformLabelMapsNode =
+    PortedCache.platformLabel "node"
+        |> expectEqual "platformLabel maps node" "node"
+
+
+digest12IsPrefix : TestResult
+digest12IsPrefix =
+    let
+        full =
+            "deadbeefcafebabe0123456789abcdef"
+
+        prefix =
+            PortedCache.digest12 full
+    in
+    outcome
+        "digest12 is the first 12 hex characters of the full digest"
+        ("Got " ++ prefix)
+        (prefix == "deadbeefcafe" && String.count prefix == 12)
+
+
+isNothing : Maybe a -> Bool
+isNothing maybe =
+    when maybe is
+        Nothing ->
+            True
+
+        Just _ ->
+            False
+
+
+expectEqual : String -> a -> a -> TestResult
+expectEqual name expected actual =
+    outcome name ("Expected " ++ Debug.toString expected ++ ", got " ++ Debug.toString actual) (expected == actual)
+
+
+outcome : String -> String -> Bool -> TestResult
+outcome name failureDetails passed =
+    { name = name
+    , passed = passed
+    , details =
+        if passed then
+            ""
+
+        else
+            failureDetails
+    }

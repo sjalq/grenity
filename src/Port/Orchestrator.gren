@@ -38,9 +38,11 @@ import Port.Error as PortError exposing (Error)
 import Port.Plan as Plan
 import Resolve.Online
 import Resolve.Solver as Solver exposing (Resolution)
+import Port.PortedCache as PortedCache
 import Review.ExtractCache as ExtractCache
 import Review.Runner
 import Stream exposing (Writable)
+import Stream.Log
 import System.File
 import System.Process
 import Task exposing (Task)
@@ -95,6 +97,10 @@ type alias Draft =
     , testModules : Array Mapping.GeneratedModule
     , diagnostics : Array Pipeline.Diagnostic
     , detectedPlatform : Mapping.Platform
+    , -- Just when this draft was served from the ported-dependency cache.
+      portedCacheHit : Maybe Path
+    , -- Just after a cache miss for a cacheable package; store after verify.
+      portedCachePending : Maybe PortedCache.Pending
     }
 
 
@@ -105,6 +111,10 @@ type alias Planned =
     , testModuleCount : Int
     , rootTestModules : Array Mapping.GeneratedModule
     , diagnostics : Array Pipeline.Diagnostic
+    , -- elmName -> cache entry path for packages served from the ported cache.
+      portedCacheHits : Dict String Path
+    , -- elmName -> pending store after successful gren verification.
+      portedCachePending : Dict String PortedCache.Pending
     }
 
 
@@ -163,7 +173,7 @@ run context permissions cliOptions =
                                                                         else
                                                                             registryForRoot
                                                                 in
-                                                                transformSources context permissions cache cliOptions.offline cliOptions.namespaceModules cliOptions.extractCache assets transformRegistry resolution cliOptions.withTests sources
+                                                                transformSources context permissions cache cliOptions.offline cliOptions.namespaceModules cliOptions.extractCache cliOptions.portedCache (cliPlatformLabel cliOptions.platform) assets transformRegistry resolution cliOptions.withTests sources
                                                             )
                                                         |> Task.andThen
                                                             (\drafts ->
@@ -311,13 +321,15 @@ transformSources
     -> Bool
     -> Bool
     -> Bool
+    -> Bool
+    -> String
     -> Assets
     -> Registry
     -> Resolution
     -> Bool
     -> Dict String Acquire.PackageSource
     -> Task Error (Dict String Draft)
-transformSources context permissions cache offline namespaceModules extractCacheEnabled assets registry resolution withTests sources =
+transformSources context permissions cache offline namespaceModules extractCacheEnabled portedCacheEnabled platformLabel assets registry resolution withTests sources =
     let
         elmHome =
             Path.join [ cache, Path.fromPosixString "elm-home" ]
@@ -352,7 +364,7 @@ transformSources context permissions cache offline namespaceModules extractCache
                                                         ("Acquired source set is missing " ++ key ++ ".")
 
                                             Just source ->
-                                                transformOne context permissions cache elmHome reviewAppCache offline namespaceModules extractCacheEnabled assets registry source withTests (key == rootName)
+                                                transformOne context permissions cache elmHome reviewAppCache offline namespaceModules extractCacheEnabled portedCacheEnabled platformLabel assets registry source withTests (key == rootName)
                                                     |> Task.map (\draft -> Dict.set key draft drafts)
                                     )
                         )
@@ -369,13 +381,99 @@ transformOne
     -> Bool
     -> Bool
     -> Bool
+    -> Bool
+    -> String
     -> Assets
     -> Registry
     -> Acquire.PackageSource
     -> Bool
     -> Bool
     -> Task Error Draft
-transformOne context permissions cacheRoot elmHome reviewAppCache offline namespaceModules extractCacheEnabled assets registry source withTests isRoot =
+transformOne context permissions cacheRoot elmHome reviewAppCache offline namespaceModules extractCacheEnabled portedCacheEnabled platformLabel assets registry source withTests isRoot =
+    let
+        coordinate =
+            { author = PackageName.author source.manifest.name
+            , name = PackageName.project source.manifest.name
+            , version = Semver.versionToString source.manifest.version
+            }
+
+        portedKey =
+            PortedCache.keyFor portedCacheEnabled cacheRoot coordinate source.sourceUrl isRoot
+
+        mappingsDirectory =
+            Path.parentPath assets.mappings
+                |> Maybe.withDefault assets.mappings
+    in
+    when portedKey is
+        Nothing ->
+            transformFresh context permissions cacheRoot elmHome reviewAppCache offline namespaceModules extractCacheEnabled assets registry source withTests isRoot Nothing
+
+        Just key ->
+            PortedCache.digestFor permissions.fileSystem mappingsDirectory context.toolVersion platformLabel namespaceModules
+                |> Task.andThen
+                    (\digestHex ->
+                        if String.isEmpty digestHex then
+                            transformFresh context permissions cacheRoot elmHome reviewAppCache offline namespaceModules extractCacheEnabled assets registry source withTests isRoot Nothing
+
+                        else
+                            let
+                                entry =
+                                    PortedCache.entryPath key.cacheRoot key.coordinate digestHex
+                            in
+                            PortedCache.load permissions.fileSystem entry digestHex
+                                |> Task.andThen
+                                    (\cached ->
+                                        when cached is
+                                            Just cachePath ->
+                                                logPortedCached context coordinate
+                                                    |> Task.andThen
+                                                        (\_ ->
+                                                            materializeDraftFromCache permissions.fileSystem source cachePath digestHex
+                                                                |> Task.onError
+                                                                    (\_ ->
+                                                                        -- Corrupt/incomplete entry: soft-miss and re-port.
+                                                                        transformFresh context permissions cacheRoot elmHome reviewAppCache offline namespaceModules extractCacheEnabled assets registry source withTests isRoot
+                                                                            (Just
+                                                                                { cacheRoot = key.cacheRoot
+                                                                                , coordinate = key.coordinate
+                                                                                , digest = digestHex
+                                                                                }
+                                                                            )
+                                                                    )
+                                                        )
+
+                                            Nothing ->
+                                                transformFresh context permissions cacheRoot elmHome reviewAppCache offline namespaceModules extractCacheEnabled assets registry source withTests isRoot
+                                                    (Just
+                                                        { cacheRoot = key.cacheRoot
+                                                        , coordinate = key.coordinate
+                                                        , digest = digestHex
+                                                        }
+                                                    )
+                                    )
+                    )
+
+
+{-| Cold transform path: extract, pipeline, adapters. `pendingStore` is `Just`
+after a ported-cache miss so the verified tree can be written later.
+-}
+transformFresh
+    : Context
+    -> Permissions
+    -> Path
+    -> Path
+    -> Path
+    -> Bool
+    -> Bool
+    -> Bool
+    -> Assets
+    -> Registry
+    -> Acquire.PackageSource
+    -> Bool
+    -> Bool
+    -> Maybe PortedCache.Pending
+    -> Task Error Draft
+transformFresh context permissions cacheRoot elmHome reviewAppCache offline namespaceModules extractCacheEnabled assets registry source withTests isRoot pendingStore =
     let
         -- Determine which directories to review: src only, or src + tests
         includeTests =
@@ -472,11 +570,151 @@ transformOne context permissions cacheRoot elmHome reviewAppCache offline namesp
                                             , testModules = partitioned.falses
                                             , diagnostics = transformed.diagnostics
                                             , detectedPlatform = detectedPlatform
+                                            , portedCacheHit = Nothing
+                                            , portedCachePending = pendingStore
                                             }
                                         )
                             )
                         |> resultTask identity
             )
+
+
+logPortedCached : Context -> PortedCache.Coordinate -> Task x {}
+logPortedCached context coordinate =
+    when context.logStream is
+        Nothing ->
+            Task.succeed {}
+
+        Just stream ->
+            Stream.Log.line stream (PortedCache.coordinateLabel coordinate ++ " (ported cached)")
+
+
+{-| Rebuild a Draft from a previously verified ported src/ tree so planning and
+emit can proceed without re-running extract/transform. gren.json is not read
+from the cache: it is resolution-specific and re-planned for the current graph.
+-}
+materializeDraftFromCache : FileSystem.Permission -> Acquire.PackageSource -> Path -> String -> Task Error Draft
+materializeDraftFromCache permission source cachePath expectedDigest =
+    let
+        srcRoot =
+            Path.join [ cachePath, Path.fromPosixString "src" ]
+    in
+    PortedCache.loadPlatform permission cachePath expectedDigest
+        |> Task.andThen
+            (\maybePlatform ->
+                when maybePlatform is
+                    Nothing ->
+                        Task.fail (PortError.create "PORTED_CACHE_INVALID" "Cached ported entry is missing a platform label.")
+
+                    Just platformName ->
+                        when parseCachedPlatform platformName is
+                            Err error ->
+                                Task.fail error
+
+                            Ok detectedPlatform ->
+                                System.File.listFilesRecursively permission srcRoot
+                                    |> Task.andThen
+                                        (\paths ->
+                                            paths
+                                                |> Array.keepIf (\path -> String.endsWith ".gren" (Path.toPosixString path))
+                                                |> Array.sortBy Path.toPosixString
+                                                |> readCachedModules permission srcRoot
+                                        )
+                                    |> Task.andThen
+                                        (\modules ->
+                                            if Array.isEmpty modules then
+                                                Task.fail (PortError.create "PORTED_CACHE_INVALID" "Cached ported entry has no .gren modules.")
+
+                                            else
+                                                Task.succeed
+                                                    { source = source
+                                                    , modules = modules
+                                                    , testModules = []
+                                                    , diagnostics = []
+                                                    , detectedPlatform = detectedPlatform
+                                                    , portedCacheHit = Just cachePath
+                                                    , portedCachePending = Nothing
+                                                    }
+                                        )
+            )
+
+
+parseCachedPlatform : String -> Result Error Mapping.Platform
+parseCachedPlatform platformName =
+    when platformName is
+        "common" ->
+            Ok Mapping.Common
+
+        "pure" ->
+            Ok Mapping.Common
+
+        "browser" ->
+            Ok Mapping.Browser
+
+        "node" ->
+            Ok Mapping.Node
+
+        other ->
+            Err (PortError.create "PORTED_CACHE_INVALID" ("Cached entry has unknown platform " ++ other ++ "."))
+
+
+readCachedModules : FileSystem.Permission -> Path -> Array Path -> Task Error (Array Mapping.GeneratedModule)
+readCachedModules permission srcRoot paths =
+    let
+        srcPrefix =
+            String.trimRight (Path.toPosixString srcRoot) ++ "/"
+    in
+    Array.foldl
+        (\path pending ->
+            pending
+                |> Task.andThen
+                    (\acc ->
+                        System.File.readText permission path
+                            |> Task.map
+                                (\contents ->
+                                    let
+                                        absolute =
+                                            Path.toPosixString path
+
+                                        underSrc =
+                                            if String.startsWith srcPrefix absolute then
+                                                String.dropFirst (String.count srcPrefix) absolute
+
+                                            else
+                                                Path.filenameWithExtension path
+
+                                        moduleName =
+                                            underSrc
+                                                |> String.dropLast (String.count ".gren")
+                                                |> String.replace "/" "."
+                                    in
+                                    Array.pushLast
+                                        { moduleName = moduleName
+                                        , relativePath = "src/" ++ underSrc
+                                        , source = contents
+                                        }
+                                        acc
+                                )
+                    )
+        )
+        (Task.succeed [])
+        paths
+
+
+cliPlatformLabel : Cli.PlatformChoice -> String
+cliPlatformLabel choice =
+    when choice is
+        Cli.Auto ->
+            PortedCache.platformLabel "auto"
+
+        Cli.ExactPlatform GrenPlatform.Common ->
+            PortedCache.platformLabel "pure"
+
+        Cli.ExactPlatform GrenPlatform.Browser ->
+            PortedCache.platformLabel "browser"
+
+        Cli.ExactPlatform GrenPlatform.Node ->
+            PortedCache.platformLabel "node"
 
 
 readSources : FileSystem.Permission -> Acquire.PackageSource -> Bool -> Task Error (Array Pipeline.SourceFile)
@@ -556,6 +794,8 @@ planPackages cliOptions registry resolution drafts =
                 , testModuleCount = totalTestModules
                 , rootTestModules = []
                 , diagnostics = []
+                , portedCacheHits = Dict.empty
+                , portedCachePending = Dict.empty
                 }
             )
 
@@ -642,6 +882,20 @@ planOne cliOptions registry resolution drafts name state =
                                             , testModuleCount = state.testModuleCount
                                             , rootTestModules = rootTests
                                             , diagnostics = Array.append state.diagnostics draft.diagnostics
+                                            , portedCacheHits =
+                                                when draft.portedCacheHit is
+                                                    Just hitPath ->
+                                                        Dict.set key hitPath state.portedCacheHits
+
+                                                    Nothing ->
+                                                        state.portedCacheHits
+                                            , portedCachePending =
+                                                when draft.portedCachePending is
+                                                    Just pending ->
+                                                        Dict.set key pending state.portedCachePending
+
+                                                    Nothing ->
+                                                        state.portedCachePending
                                             }
                                         )
                     )
@@ -686,13 +940,7 @@ finalize context permissions cliOptions output overlayPaths assets registry reso
                                 encodeLock resolution rootIdentity metadata.compilerVersion metadata.mappingDigest planned
 
                             validate staging =
-                                prepareStaging context.platform
-                                    permissions.fileSystem
-                                    permissions.childProcess
-                                    assets
-                                    rootIdentity
-                                    planned
-                                    staging
+                                prepareStaging context permissions assets rootIdentity planned staging
                         in
                         Workspace.emit
                             { fileSystem = permissions.fileSystem }
@@ -814,46 +1062,97 @@ finalize context permissions cliOptions output overlayPaths assets registry reso
 {-| Pretty-print every emitted package (skip volume catalogs), then verify with Gren.
 -}
 prepareStaging
-    : Node.Platform
-    -> FileSystem.Permission
-    -> ChildProcess.Permission
+    : Context
+    -> Permissions
     -> Assets
     -> Plan.Identity
     -> Planned
     -> Path
     -> Task Error {}
-prepareStaging platform fileSystem permission assets rootIdentity planned staging =
-    formatStaging platform fileSystem permission assets.formatExecutable rootIdentity planned staging
-        |> Task.andThen
-            (\_ ->
-                verifyStaging platform permission assets.grenExecutable rootIdentity planned staging
-            )
-
-
-formatStaging
-    : Node.Platform
-    -> FileSystem.Permission
-    -> ChildProcess.Permission
-    -> String
-    -> Plan.Identity
-    -> Planned
-    -> Path
-    -> Task Error {}
-formatStaging platform fileSystem permission formatExecutable rootIdentity planned staging =
+prepareStaging context permissions assets rootIdentity planned staging =
     planned.packages
         |> Array.foldl
             (\package pending ->
                 pending
                     |> Task.andThen
                         (\_ ->
-                            let
-                                dir =
-                                    packageDirectory rootIdentity planned staging package
-                            in
-                            maybeFormatPackage platform fileSystem permission formatExecutable dir
+                            prepareOnePackage context permissions assets rootIdentity planned staging package
                         )
             )
             (Task.succeed {})
+
+
+prepareOnePackage
+    : Context
+    -> Permissions
+    -> Assets
+    -> Plan.Identity
+    -> Planned
+    -> Path
+    -> Workspace.Package
+    -> Task Error {}
+prepareOnePackage context permissions assets rootIdentity planned staging package =
+    let
+        dir =
+            packageDirectory rootIdentity planned staging package
+
+        elmName =
+            package.sourcePackage
+    in
+    when Dict.get elmName planned.portedCacheHits is
+        Just _ ->
+            -- Cache hit: modules were loaded from a previously verified tree;
+            -- gren.json was re-planned for this resolution. Skip format+verify.
+            Task.succeed {}
+
+        Nothing ->
+            maybeFormatPackage context.platform permissions.fileSystem permissions.childProcess assets.formatExecutable dir
+                |> Task.andThen
+                    (\_ ->
+                        Verify.Package.verify context.platform
+                            permissions.childProcess
+                            { packageDirectory = dir
+                            , grenExecutable = assets.grenExecutable
+                            , isApplication =
+                                when package.manifest.kind is
+                                    Manifest.ApplicationKind ->
+                                        True
+
+                                    Manifest.PackageKind ->
+                                        False
+                            }
+                    )
+                |> Task.andThen
+                    (\_ ->
+                        when Dict.get elmName planned.portedCachePending is
+                            Nothing ->
+                                Task.succeed {}
+
+                            Just pending ->
+                                let
+                                    entry =
+                                        PortedCache.entryPath pending.cacheRoot pending.coordinate pending.digest
+
+                                    platformName =
+                                        when package.manifest.platform is
+                                            GrenPlatform.Common ->
+                                                "common"
+
+                                            GrenPlatform.Browser ->
+                                                "browser"
+
+                                            GrenPlatform.Node ->
+                                                "node"
+                                in
+                                PortedCache.store context.platform
+                                    permissions.childProcess
+                                    permissions.fileSystem
+                                    entry
+                                    dir
+                                    context.toolVersion
+                                    pending.digest
+                                    platformName
+                    )
 
 
 {-| Format unless the package is a volume catalog (icon/CSS dumps).
@@ -879,31 +1178,6 @@ maybeFormatPackage platform fileSystem permission formatExecutable packageDir =
                         , formatExecutable = formatExecutable
                         }
             )
-
-
-verifyStaging : Node.Platform -> ChildProcess.Permission -> String -> Plan.Identity -> Planned -> Path -> Task Error {}
-verifyStaging platform permission grenExecutable rootIdentity planned staging =
-    planned.packages
-        |> Array.foldl
-            (\package pending ->
-                pending
-                    |> Task.andThen
-                        (\_ ->
-                            Verify.Package.verify platform
-                                permission
-                                { packageDirectory = packageDirectory rootIdentity planned staging package
-                                , grenExecutable = grenExecutable
-                                , isApplication =
-                                    when package.manifest.kind is
-                                        Manifest.ApplicationKind ->
-                                            True
-
-                                        Manifest.PackageKind ->
-                                            False
-                                }
-                        )
-            )
-            (Task.succeed {})
 
 
 packageDirectory : Plan.Identity -> Planned -> Path -> Workspace.Package -> Path
@@ -1578,6 +1852,7 @@ finalizeAdd context permissions cliOptions output assets resolution planned =
                                                             permissions
                                                             assets
                                                             staging
+                                                            planned
                                                             vendored
                                                     )
                                                 |> Task.andThen
@@ -1615,9 +1890,10 @@ writeVendored
     -> Permissions
     -> Assets
     -> Path
+    -> Planned
     -> Array Workspace.Package
     -> Task Error {}
-writeVendored context permissions assets packagesRoot packages =
+writeVendored context permissions assets packagesRoot planned packages =
     Array.foldl
         (\package pending ->
             pending
@@ -1639,31 +1915,74 @@ writeVendored context permissions assets packagesRoot packages =
                                                     }
                                                 )
                                             ]
+
+                                    elmName =
+                                        package.sourcePackage
                                 in
                                 removePath permissions.fileSystem directory
-                                    |> Task.andThen (\_ -> PackageEmit.write permissions.fileSystem directory prepared)
                                     |> Task.andThen
                                         (\_ ->
-                                            maybeFormatPackage context.platform
-                                                permissions.fileSystem
-                                                permissions.childProcess
-                                                assets.formatExecutable
-                                                directory
-                                        )
-                                    |> Task.andThen
-                                        (\_ ->
-                                            Verify.Package.verify context.platform
-                                                permissions.childProcess
-                                                { packageDirectory = directory
-                                                , grenExecutable = assets.grenExecutable
-                                                , isApplication =
-                                                    when package.manifest.kind is
-                                                        Manifest.ApplicationKind ->
-                                                            True
+                                            PackageEmit.write permissions.fileSystem directory prepared
+                                                |> Task.andThen
+                                                    (\_ ->
+                                                        when Dict.get elmName planned.portedCacheHits is
+                                                            Just _ ->
+                                                                -- Hit: modules already verified under this digest.
+                                                                Task.succeed {}
 
-                                                        Manifest.PackageKind ->
-                                                            False
-                                                }
+                                                            Nothing ->
+                                                                maybeFormatPackage context.platform
+                                                                    permissions.fileSystem
+                                                                    permissions.childProcess
+                                                                    assets.formatExecutable
+                                                                    directory
+                                                                    |> Task.andThen
+                                                                        (\_ ->
+                                                                            Verify.Package.verify context.platform
+                                                                                permissions.childProcess
+                                                                                { packageDirectory = directory
+                                                                                , grenExecutable = assets.grenExecutable
+                                                                                , isApplication =
+                                                                                    when package.manifest.kind is
+                                                                                        Manifest.ApplicationKind ->
+                                                                                            True
+
+                                                                                        Manifest.PackageKind ->
+                                                                                            False
+                                                                                }
+                                                                        )
+                                                                    |> Task.andThen
+                                                                        (\_ ->
+                                                                            when Dict.get elmName planned.portedCachePending is
+                                                                                Nothing ->
+                                                                                    Task.succeed {}
+
+                                                                                Just storePending ->
+                                                                                    let
+                                                                                        entry =
+                                                                                            PortedCache.entryPath storePending.cacheRoot storePending.coordinate storePending.digest
+
+                                                                                        platformName =
+                                                                                            when package.manifest.platform is
+                                                                                                GrenPlatform.Common ->
+                                                                                                    "common"
+
+                                                                                                GrenPlatform.Browser ->
+                                                                                                    "browser"
+
+                                                                                                GrenPlatform.Node ->
+                                                                                                    "node"
+                                                                                    in
+                                                                                    PortedCache.store context.platform
+                                                                                        permissions.childProcess
+                                                                                        permissions.fileSystem
+                                                                                        entry
+                                                                                        directory
+                                                                                        context.toolVersion
+                                                                                        storePending.digest
+                                                                                        platformName
+                                                                        )
+                                                    )
                                         )
                     )
         )

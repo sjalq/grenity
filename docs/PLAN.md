@@ -362,10 +362,20 @@ Coverage and pipeline:
   law is that the entry's verified bytes ARE the artifact. Hit
   packages now get their src/ replaced by a native `cp -a` of the
   entry (replaceSrcFromEntry) in both the workspace and add flows;
-  the re-plan still owns gren.json. The module-record re-emission
-  path that corrupted remains unexplained upstream of the fix —
-  root-cause it when the walk is done (the fix makes it unreachable
-  for cached serves). Receipt: elm-review-debug rerun in flight.
+  the re-plan still owns gren.json. ROOT CAUSE FOUND same night via
+  line-count timeline forensics (the staged file was CORRECT at 6060
+  lines, then flipped to 5929 mid-run): the corruptor was
+  tools/gren-format/collapse-record-patterns.cjs — the ROOT package's
+  format pass hands it the workspace top and its walker descended
+  into .elm-to-gren/packages, re-collapsing the already-collapsed
+  vendored trees; the second application is not idempotent and splits
+  a string literal across lines (the ENDLESS STRING). Fix: the walker
+  now skips .elm-to-gren/.gren/elm-stuff. The D48 byte-copy phase
+  stays as defense-in-depth. The collapse idempotency bug itself is
+  ledgered (harmless while nothing double-applies). RECEIPT LANDED:
+  jfmengels/elm-review-debug@1.0.8 ports END-TO-END (EXIT=0) off the
+  banked elm-review entry — the elm-review family unlock is complete
+  (D47+D48 receipts both proven).
 - **D47 vendored packages missing transitive local-dep declarations**
   (found banking elm-review as a ported dep 2026-07-23: gren's solver
   rejected the tree with INDIRECT LOCAL DEPENDENCY on

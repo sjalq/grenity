@@ -214,7 +214,18 @@ function joinTypeHeaders(source) {
 
 function walk(dir, files = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === "gren_packages" || entry.name === "node_modules" || entry.name === ".git") {
+    // D48: never descend into vendored/transient trees. `.elm-to-gren`
+    // holds per-package-verified dependency sources; a second collapse
+    // pass over already-collapsed output is not idempotent and has
+    // corrupted string literals (elm-review Rule.gren).
+    if (
+      entry.name === "gren_packages" ||
+      entry.name === "node_modules" ||
+      entry.name === ".git" ||
+      entry.name === ".elm-to-gren" ||
+      entry.name === ".gren" ||
+      entry.name === "elm-stuff"
+    ) {
       continue;
     }
     const full = path.join(dir, entry.name);

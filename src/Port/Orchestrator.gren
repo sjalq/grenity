@@ -1179,16 +1179,38 @@ prepareStaging
     -> Path
     -> Task Error {}
 prepareStaging context permissions assets rootIdentity planned staging =
+    -- D48 phase 1: land every cache-hit package's verified bytes BEFORE any
+    -- verify runs (the root's verify builds the dep dirs, so copies must be
+    -- complete first regardless of package iteration order).
     planned.packages
         |> Array.foldl
             (\package pending ->
                 pending
                     |> Task.andThen
                         (\_ ->
-                            prepareOnePackage context permissions assets rootIdentity planned staging package
+                            when Dict.get package.sourcePackage planned.portedCacheHits is
+                                Just cachePath ->
+                                    replaceSrcFromEntry context permissions cachePath
+                                        (packageDirectory rootIdentity planned staging package)
+
+                                Nothing ->
+                                    Task.succeed {}
                         )
             )
             (Task.succeed {})
+        |> Task.andThen
+            (\_ ->
+                planned.packages
+                    |> Array.foldl
+                        (\package pending ->
+                            pending
+                                |> Task.andThen
+                                    (\_ ->
+                                        prepareOnePackage context permissions assets rootIdentity planned staging package
+                                    )
+                        )
+                        (Task.succeed {})
+            )
 
 
 prepareOnePackage
@@ -1209,13 +1231,10 @@ prepareOnePackage context permissions assets rootIdentity planned staging packag
             package.sourcePackage
     in
     when Dict.get elmName planned.portedCacheHits is
-        Just cachePath ->
-            -- Cache hit: gren.json was re-planned for this resolution, but the
-            -- MODULE BYTES must be the entry's verified bytes — D48: routing
-            -- them through module records re-emitted an unformatted reprint
-            -- with corrupted string literals, unverified because this skip
-            -- assumed byte fidelity. Serve src/ by native copy instead.
-            replaceSrcFromEntry context permissions cachePath dir
+        Just _ ->
+            -- Cache hit: verified bytes were copied in prepareStaging's D48
+            -- phase 1; gren.json is re-planned. Nothing further to do.
+            Task.succeed {}
 
         Nothing ->
             maybeFormatPackage context.platform permissions.fileSystem permissions.childProcess assets.formatExecutable dir

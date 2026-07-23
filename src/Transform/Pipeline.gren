@@ -4,6 +4,7 @@ module Transform.Pipeline exposing
     , TransformResult
     , TransformedModule
     , collectMappingEdits
+    , collectPackageCtorArities
     , convertEditKind
     , ensureModuleImports
     , toGrenSourcePath
@@ -84,6 +85,9 @@ type alias TransformResult =
     , diagnostics : Array Diagnostic
     , requiredAdapters : Array String
     , detectedPlatform : String
+    , -- D45: this package's multi-arg ctor arities (post-NameSub keys),
+      -- exported so dependents recordify PARTIAL applications of them.
+      ctorArities : Dict String Int
     }
 
 
@@ -357,8 +361,8 @@ importEdit registry fact =
             )
 
 
-transform : Registry -> Protocol.Extraction -> Array SourceFile -> Result Error TransformResult
-transform registry extraction sources =
+transform : Registry -> Dict String Int -> Protocol.Extraction -> Array SourceFile -> Result Error TransformResult
+transform registry depCtorArities extraction sources =
     validateExtraction extraction sources
         |> Result.andThen
             (\_ ->
@@ -380,8 +384,15 @@ transform registry extraction sources =
                     packageRecordAliases =
                         collectPackageRecordAliases registry extraction.modules
 
-                    packageCtorArities =
+                    ownCtorArities =
                         collectPackageCtorArities registry extraction.modules
+
+                    -- D45: dependency ctor arities merged UNDER this
+                    -- package's own (own keys win on collision), so
+                    -- CtorLaw recordifies partial applications of
+                    -- cross-package ctors (elm-syntax's Node etc.).
+                    packageCtorArities =
+                        Dict.foldl Dict.set depCtorArities ownCtorArities
 
                     packageSoleCtors =
                         collectPackageSoleCtors registry extraction.modules
@@ -440,6 +451,8 @@ transform registry extraction sources =
                             , diagnostics = diagnostics
                             , requiredAdapters = requiredAdapters
                             , detectedPlatform = aggregatePlatform transformedModules
+                            , ctorArities =
+                                collectPackageCtorArities registry extraction.modules
                             }
                         )
             )

@@ -352,6 +352,23 @@ Coverage and pipeline:
   suite went from 0 tests ran (compile-dead) to 215/219 passing.
   The 4 fails are list-extra's own "stack safety" 10k-recursion tests
   (RangeError) — a NEW distinct class, filed as D35.
+- **D45 cross-package partial ctor applications never recordified**
+  (found by the D24b/D42-fixed elm-review diagnostic 2026-07-23 — its
+  LAST failing module, Compute, uses `Array.map (Node.Node
+  Range.emptyRange)`; FIXED same day, Fable; E2E receipt pending the
+  diagnostic re-run): CtorLaw handles curried multi-arg ctors via
+  shared helpers but its arity map only ever contained the package
+  being ported — dependency ctors (elm-syntax's Node) were invisible,
+  so their PARTIAL applications survived raw (fully-applied ones are
+  recordified structurally by Print, masking the gap). Fix: the
+  orchestrator's dependency-ordered fold accumulates each package's
+  post-NameSub ctor arities (TransformResult/Draft.ctorArities) and
+  feeds them into every dependent's Pipeline.transform, merged UNDER
+  the package's own keys; ported-cache-served deps recover arities from
+  the cached extraction (Runner.loadCachedExtraction, soft-degrade to
+  empty). LATENT SIBLINGS ledgered (D45b): RecordAlias ctors, sole
+  ctors, and Reserved exports have the same cross-package blindness —
+  no walk evidence yet, fix on evidence.
 - **D44 ported-cache digest survives dist rebuilds** (found 2026-07-23
   when a pre-rebuild elm-syntax ported entry served "(ported cached)"
   to a post-rebuild run; OPEN, deliberate for the walk): digestFor

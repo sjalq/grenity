@@ -1,4 +1,4 @@
-module Review.Runner exposing (Options, run)
+module Review.Runner exposing (Options, loadCachedExtraction, run)
 
 {-| Run elm-review extract for a package.
 
@@ -112,6 +112,30 @@ run platform childProcess options =
                                                         )
                                     )
                     )
+
+
+{-| D45: read a package's cached extraction WITHOUT ever shelling out (returns
+Nothing on any miss). Used by the orchestrator to recover dependency ctor
+arities when the ported-dependency cache already served the transformed tree
+and the normal extract step was skipped.
+-}
+loadCachedExtraction :
+    FileSystem.Permission
+    -> Path
+    -> Array String
+    -> ExtractCache.Key
+    -> Task x (Maybe Extraction)
+loadCachedExtraction fileSystem reviewConfig files key =
+    ExtractCache.digestFor fileSystem reviewConfig reviewCliRelative files
+        |> Task.andThen
+            (\digestHex ->
+                if String.isEmpty digestHex then
+                    Task.succeed Nothing
+
+                else
+                    ExtractCache.load fileSystem
+                        (ExtractCache.cacheFilePath key.cacheRoot key.coordinate digestHex)
+            )
 
 
 {-| Cold extraction: seed the shared review app, shell out under the D30 compile

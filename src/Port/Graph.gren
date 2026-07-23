@@ -417,7 +417,7 @@ transformOne permissions options registry source =
         }
         |> Task.andThen
             (\extraction ->
-                Pipeline.transform registry extraction pipelineSources
+                Pipeline.transform registry Dict.empty extraction pipelineSources
                     |> resultTask identity
             )
         |> Task.andThen

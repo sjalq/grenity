@@ -365,7 +365,7 @@ Coverage and pipeline:
   does not declare the ctor re-points to the SOLE importable declaring
   module. Unknown (dependency) modules, ambiguous homes, and
   declared-as-stated refs never touched. Tier 0: 260 incl. 5 CtorHome
-  checks. E2E receipt: elm-review rerun in flight.
+  checks. E2E RECEIPT LANDED 2026-07-23: jfmengels/elm-review@2.16.6 ports and gren-verifies clean (EXIT=0, zero panics, zero compile errors) — the joint receipt for D24b+D42+D45+D45b+D46.
 - **D45b cross-package sole ctors got dead wildcards → Gren compiler
   panic** (found by the post-D45 elm-review verify 2026-07-23: staging
   snapshot + module bisect landed on `when h is (Node.Node {…}) -> …;

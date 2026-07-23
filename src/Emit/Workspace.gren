@@ -419,7 +419,29 @@ atomicReplace permission staging destination =
 
                             else
                                 move permission destination staging "publish output"
+                                    |> Task.onError (adoptWinner permission staging destination)
                         )
+            )
+
+
+{-| D43: the exists-check/rename pair races when two ports publish the
+same coordinate concurrently (canary -j4, doubled seed launches): the
+loser's rename lands on the winner's fresh directory and dies ENOTEMPTY.
+Same tool + same inputs = equivalent output, so the D34 law applies:
+adopt the winner, drop our staging.
+-}
+adoptWinner : FileSystem.Permission -> Path -> Path -> Error -> Task Error {}
+adoptWinner permission staging destination publishError =
+    System.File.exists permission destination
+        |> Task.onError (\_ -> Task.succeed False)
+        |> Task.andThen
+            (\winnerPresent ->
+                if winnerPresent then
+                    removeIfExists permission staging
+                        |> Task.onError (\_ -> Task.succeed {})
+
+                else
+                    Task.fail publishError
             )
 
 

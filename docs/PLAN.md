@@ -352,6 +352,23 @@ Coverage and pipeline:
   suite went from 0 tests ran (compile-dead) to 215/219 passing.
   The 4 fails are list-extra's own "stack safety" 10k-recursion tests
   (RangeError) — a NEW distinct class, filed as D35.
+- **D44 ported-cache digest survives dist rebuilds** (found 2026-07-23
+  when a pre-rebuild elm-syntax ported entry served "(ported cached)"
+  to a post-rebuild run; OPEN, deliberate for the walk): digestFor
+  hashes toolVersion (static "0.1.x") + mappings + platform +
+  namespacing but NOT the tool build, so entries banked by an older
+  dist keep serving after fixes land. Entries are gren-verified so they
+  compile and review — but they lack later transform fixes. Acceptable
+  during the walk (acceleration; verdicts are about portability, not
+  byte-freshness). MUST fix before release: fold a dist content hash
+  into digestFor, or prune ported/ on rebuild.
+- **D43 output publish raced concurrent same-coordinate ports** (found
+  by canary + doubled hub seeds 2026-07-23, FIXED same day, Fable):
+  Emit.Workspace.atomicReplace's exists-check/rename pair is TOCTOU;
+  the loser's rename hit the winner's fresh directory (ENOTEMPTY:
+  OUTPUT_FAILED). Same tool + same inputs = equivalent output, so the
+  D34 adopt-the-winner law now applies to output publish: on rename
+  failure with the destination present, drop our staging and succeed.
 - **D42 oversized single-line list bodies break Gren's parser** (found
   by the elm-review hub seed 2026-07-23; FIXED same day, Opus subagent +
   Fable QA): NOT an escaping bug — Gren 0.6.6's parser aborts with
